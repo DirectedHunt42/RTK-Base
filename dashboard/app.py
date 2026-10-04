@@ -32,11 +32,23 @@ def get_str2str():
     journal = run("journalctl -u str2str -n 10 --no-pager -o cat 2>/dev/null")
     return status, journal
 
+def get_rtcm_port() -> int:
+    try:
+        port = int(Path("/var/lib/rtk-base/stream-port").read_text(encoding="ascii").strip())
+        return port if 1 <= port <= 65535 else 2101
+    except (OSError, ValueError):
+        return 2101
+
 def get_listening() -> str:
-    return run("ss -ltnp | grep -E ':2101|:2948|:8080' || true")
+    listeners = run("ss -ltnp")
+    ports = {get_rtcm_port(), 80, 8080, 2948}
+    return "\n".join(
+        line for line in listeners.splitlines()
+        if len(line.split()) > 3 and any(line.split()[3].endswith(f":{port}") for port in ports)
+    )
 
 def get_rtcm_client_count() -> int:
-    connections = run("ss -Htn state established '( sport = :2101 )'")
+    connections = run(f"ss -Htn state established '( sport = :{get_rtcm_port()} )'")
     return len(connections.splitlines()) if connections else 0
 
 def get_service_restarts() -> str:
@@ -830,7 +842,7 @@ def api_data():
         "disk": f"{disk.used // 1024 // 1024 // 1024:.1f} / {disk.total // 1024 // 1024 // 1024:.1f} GB ({disk.percent}%)",
         "disk_pct": disk.percent,
         "load": f"{load[0]:.2f}   {load[1]:.2f}   {load[2]:.2f}",
-        "rtcm_port": 2101,
+        "rtcm_port": get_rtcm_port(),
         "rtcm_clients": get_rtcm_client_count(),
         "str_restarts": get_service_restarts(),
         "wifi": get_wifi_data(),

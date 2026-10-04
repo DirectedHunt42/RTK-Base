@@ -5,6 +5,7 @@ Conflicts=str2str.service
 
 [Service]
 Type=simple
-ExecStart=/usr/sbin/gpsd -N -n -S 2948 -F /run/rtk-base-gpsd.sock /dev/serial/by-id/usb-u-blox_AG_-_www.u-blox.com_u-blox_GNSS_receiver-if00
+EnvironmentFile=/etc/default/rtk-base
+ExecStart=/usr/sbin/gpsd -N -n -S 2948 -F /run/rtk-base-gpsd.sock ${RTK_BASE_GNSS_DEVICE}
 Restart=on-failure
 RestartSec=3

@@ -5,8 +5,11 @@ Wants=network-online.target
 
 [Service]
 Type=simple
+EnvironmentFile=/etc/default/rtk-base
+StateDirectory=rtk-base
+StateDirectoryMode=0755
 ExecStartPre=/bin/sleep 4
-ExecStart=/usr/local/bin/str2str -in serial://serial/by-id/usb-u-blox_AG_-_www.u-blox.com_u-blox_GNSS_receiver-if00:115200#ubx -out tcpsvr://:2101
+ExecStart=/usr/local/sbin/rtk-base-start-str2str
 Restart=always
 RestartSec=5
 

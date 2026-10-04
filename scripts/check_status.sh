@@ -8,7 +8,9 @@ echo "Dashboard service:"
 systemctl is-active rtk-dashboard
 echo ""
 echo "Listening ports:"
-ss -ltnp | grep -E '2101|2948|8080' || echo "None"
+RTCM_PORT=$(cat /var/lib/rtk-base/stream-port 2>/dev/null || echo 2101)
+ss -ltnp | grep -E ":${RTCM_PORT}|:2948|:8080" || echo "None"
+echo "RTCM output port: ${RTCM_PORT}"
 echo ""
 echo "Recent str2str log:"
 journalctl -u str2str -n 6 --no-pager -o cat
