@@ -10,6 +10,9 @@ Planner.
 - Starts the RTCM stream and diagnostics dashboard at boot
 - Live system and network diagnostics, plus switchable GPS telemetry
 - Dashboard available on the standard HTTP port
+- Satellite sky view, signal strengths, and receiver position map in telemetry mode
+
+Dashboard version: **0.2.0** (`dashboard/VERSION`)
 
 ## Hardware
 
@@ -19,8 +22,8 @@ Planner.
 ## Install
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/rtk-base.git
-cd rtk-base
+git clone https://github.com/DirectedHunt42/RTK-Base.git
+cd RTK-Base
 sudo ./setup.sh
 ```
 
@@ -56,9 +59,11 @@ socket service is disabled so it cannot claim the receiver port independently.
 Anyone with access to the dashboard can change the active mode.
 
 GPS telemetry mode also shows the receiver on an interactive OpenStreetMap
-map, with a satellite sky plot and signal-strength bars. The map and its tiles
-need an internet connection; the GPS and satellite graphics use the receiver's
-GPSD data.
+map, a satellite sky plot, signal-strength bars, DOP values, and GPSD's
+estimated accuracy and fix time. The map and its tiles need an internet
+connection; the GPS and satellite graphics use the receiver's GPSD data. The
+GPSD sky view reports visible satellites and marks which ones are used in the
+current fix.
 
 ## Useful commands
 

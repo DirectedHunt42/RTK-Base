@@ -7,8 +7,11 @@ Terminal-style web interface
 from flask import Flask, render_template_string, jsonify, request
 import json, subprocess, os, socket, psutil
 from datetime import datetime, timedelta
+from pathlib import Path
 
 app = Flask(__name__)
+APP_VERSION = (Path(__file__).resolve().parent / "VERSION").read_text(encoding="utf-8").strip()
+GNSS_NAMES = {0: "GPS", 1: "SBAS", 2: "Galileo", 3: "BeiDou", 4: "IMES", 5: "QZSS", 6: "GLONASS", 7: "NavIC"}
 
 def run(cmd: str) -> str:
     try:
@@ -57,6 +60,12 @@ def get_network() -> str:
     except Exception:
         return "Network interface details unavailable"
 
+def satellite_label(satellite: dict) -> str:
+    gnssid = satellite.get("gnssid")
+    constellation = GNSS_NAMES.get(gnssid, f"GNSS{gnssid}") if gnssid is not None else "SV"
+    satellite_id = satellite.get("svid", satellite.get("PRN", "?"))
+    return f"{constellation} {satellite_id}"
+
 def get_gps_data() -> dict:
     """Read optional GPSD telemetry without opening the receiver serial port."""
     result = {
@@ -70,16 +79,26 @@ def get_gps_data() -> dict:
         "satellites": "—",
         "satellite_detail": "",
         "satellite_data": [],
+        "satellite_status": "Waiting for GPSD sky view",
+        "hdop": "—",
+        "pdop": "—",
+        "accuracy": "—",
+        "fix_time": "—",
     }
     try:
         with socket.create_connection(("127.0.0.1", 2948), timeout=0.5) as conn:
-            conn.settimeout(0.5)
-            conn.sendall(b'?WATCH={"enable":true,"json":true};\n')
+            conn.settimeout(1.0)
+            conn.sendall(b'?WATCH={"enable":true,"json":true};?POLL;\n')
             stream = conn.makefile("r", encoding="utf-8", errors="replace")
             tpv = None
             sky = None
+            sky_report_received = False
+            poll_received = False
             for _ in range(30):
-                line = stream.readline()
+                try:
+                    line = stream.readline()
+                except socket.timeout:
+                    break
                 if not line:
                     break
                 try:
@@ -90,7 +109,19 @@ def get_gps_data() -> dict:
                     tpv = message
                 elif message.get("class") == "SKY":
                     sky = message
-                if tpv and sky:
+                    sky_report_received = True
+                elif message.get("class") == "POLL":
+                    poll_received = True
+                    polled_tpv = message.get("tpv") or []
+                    polled_sky = message.get("sky") or []
+                    if polled_tpv:
+                        tpv = polled_tpv[-1]
+                    if polled_sky:
+                        sky = polled_sky[-1]
+                        sky_report_received = True
+                if tpv and sky and (sky.get("satellites") or poll_received):
+                    break
+                if tpv and poll_received:
                     break
             if tpv or sky:
                 mode = (tpv or {}).get("mode", 0)
@@ -103,12 +134,26 @@ def get_gps_data() -> dict:
                     result["altitude"] = f"{tpv['alt']:.1f} m"
                 if tpv and "speed" in tpv:
                     result["speed"] = f"{tpv['speed']:.2f} m/s"
+                if tpv and "eph" in tpv:
+                    result["accuracy"] = f"~{tpv['eph']:.1f} m (GPSD estimate)"
+                if tpv and tpv.get("time"):
+                    result["fix_time"] = str(tpv["time"])
                 satellites = (sky or {}).get("satellites", [])
+                if sky and sky.get("hdop") is not None:
+                    result["hdop"] = f"{sky['hdop']:.2f}"
+                if sky and sky.get("pdop") is not None:
+                    result["pdop"] = f"{sky['pdop']:.2f}"
                 used = [sat for sat in satellites if sat.get("used")]
                 result["satellites"] = f"{len(used)} used / {len(satellites)} visible"
+                if satellites:
+                    result["satellite_status"] = "GPSD sky view received"
+                elif sky_report_received:
+                    result["satellite_status"] = "GPSD sent a SKY report with no satellite entries"
+                else:
+                    result["satellite_status"] = "No SKY report from GPSD; check receiver satellite output"
                 result["satellite_data"] = [
                     {
-                        "id": f"{sat.get('gnssid', '')}-{sat.get('svid', sat.get('PRN', '?'))}",
+                        "id": satellite_label(sat),
                         "used": bool(sat.get("used")),
                         "signal": sat.get("ss"),
                         "azimuth": sat.get("az"),
@@ -119,7 +164,7 @@ def get_gps_data() -> dict:
                 if satellites:
                     result["satellite_detail"] = "\n".join(
                         f"{'USED ' if sat.get('used') else ''}"
-                        f"{sat.get('gnssid', '')}{sat.get('svid', sat.get('PRN', '?'))}: "
+                        f"{satellite_label(sat)}: "
                         f"SNR {sat.get('ss', '—')} dB-Hz"
                         for sat in satellites
                     )
@@ -215,6 +260,7 @@ HTML = r"""
   .grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+    grid-auto-rows: minmax(260px, auto);
     gap: 18px;
   }
   .card {
@@ -222,6 +268,8 @@ HTML = r"""
     border: 1px solid var(--border);
     border-radius: 10px;
     padding: 18px;
+    display: flex;
+    flex-direction: column;
   }
   .card h2 {
     color: var(--amber);
@@ -232,6 +280,7 @@ HTML = r"""
     gap: 8px;
     text-transform: uppercase;
     letter-spacing: 1px;
+    flex: 0 0 auto;
   }
   .card h2::before {
     content: "▶";
@@ -244,6 +293,9 @@ HTML = r"""
     font-size: 12px;
     color: var(--text);
   }
+  .scroll-fill { flex: 1 1 auto; min-height: 100px; overflow: auto; }
+  .scroll-stack { display: flex; flex: 1 1 auto; min-height: 180px; flex-direction: column; gap: 12px; }
+  .scroll-stack > .scroll-fill { min-height: 70px; }
   .status {
     display: inline-block;
     padding: 3px 10px;
@@ -298,7 +350,7 @@ HTML = r"""
     z-index: 0;
   }
   .map-note { color: var(--dim); font-size: 11px; margin-top: 8px; }
-  .satellite-graphics { display: grid; grid-template-columns: minmax(190px, 240px) 1fr; gap: 18px; align-items: center; }
+  .satellite-graphics { display: grid; flex: 1 1 auto; min-height: 240px; grid-template-columns: minmax(190px, 240px) 1fr; gap: 18px; align-items: center; }
   #satellite-sky { width: 100%; max-width: 240px; height: auto; }
   .sky-ring { fill: none; stroke: #28523f; stroke-width: 1; }
   .sky-cross { stroke: #1e3b2d; stroke-width: 1; }
@@ -306,7 +358,7 @@ HTML = r"""
   .sky-sat { fill: #666; stroke: #0a0a0a; stroke-width: 1.5; }
   .sky-sat.used { fill: var(--green); }
   .sky-label { fill: var(--text); font: 8px 'JetBrains Mono', monospace; text-anchor: middle; }
-  .signal-list { display: grid; gap: 6px; max-height: 240px; overflow: auto; }
+  .signal-list { display: grid; align-content: start; gap: 6px; flex: 1 1 auto; min-height: 220px; overflow: auto; }
   .signal-row { display: grid; grid-template-columns: 52px 1fr 40px; gap: 8px; align-items: center; font-size: 11px; }
   .signal-track { height: 7px; background: #1a1a1a; border-radius: 5px; overflow: hidden; }
   .signal-fill { height: 100%; background: #777; border-radius: inherit; }
@@ -350,7 +402,7 @@ HTML = r"""
     <div class="card">
       <h2>str2str Service</h2>
       <div class="metric"><span>Status</span><span id="str-status" class="status">–</span></div>
-      <pre id="str-log" style="margin-top:12px; max-height:180px; overflow:auto; color:#aaa;"></pre>
+      <pre id="str-log" class="scroll-fill" style="margin-top:12px; color:#aaa;"></pre>
     </div>
 
     <div class="card">
@@ -367,7 +419,11 @@ HTML = r"""
       <div class="metric"><span>Altitude</span><span id="gps-altitude">—</span></div>
       <div class="metric"><span>Speed</span><span id="gps-speed">—</span></div>
       <div class="metric"><span>Satellites</span><span id="gps-satellites">—</span></div>
-      <pre id="gps-satellite-detail" style="margin-top:12px; max-height:140px; overflow:auto; color:#aaa;"></pre>
+      <div class="metric"><span>Estimated accuracy</span><span id="gps-accuracy">—</span></div>
+      <div class="metric"><span>HDOP / PDOP</span><span id="gps-dop">—</span></div>
+      <div class="metric"><span>Fix time (UTC)</span><span id="gps-fix-time">—</span></div>
+      <pre id="gps-satellite-detail" class="scroll-fill" style="margin-top:12px; color:#aaa;"></pre>
+      <div id="satellite-status" class="map-note">Waiting for GPSD sky view</div>
     </div>
 
     <div class="card">
@@ -397,23 +453,25 @@ HTML = r"""
 
     <div class="card">
       <h2>Network & Ports</h2>
-      <pre id="network"></pre>
-      <pre id="ports" style="margin-top:12px; color:#aaa;"></pre>
+      <div class="scroll-stack">
+        <pre id="network" class="scroll-fill"></pre>
+        <pre id="ports" class="scroll-fill" style="color:#aaa;"></pre>
+      </div>
     </div>
 
     <div class="card">
       <h2>USB Devices</h2>
-      <pre id="usb"></pre>
+      <pre id="usb" class="scroll-fill"></pre>
     </div>
 
     <div class="card">
       <h2>Serial Devices</h2>
-      <pre id="serial"></pre>
+      <pre id="serial" class="scroll-fill"></pre>
     </div>
   </div>
 
   <footer>
-    RTK-Base Dashboard · Raspberry Pi · data refreshes automatically
+    RTK-Base Dashboard v{{ version }} · Raspberry Pi · data refreshes automatically
   </footer>
 
 <script>
@@ -554,7 +612,11 @@ async function refresh() {
     document.getElementById('gps-altitude').textContent = d.gps.altitude;
     document.getElementById('gps-speed').textContent = d.gps.speed;
     document.getElementById('gps-satellites').textContent = d.gps.satellites;
+    document.getElementById('gps-accuracy').textContent = d.gps.accuracy;
+    document.getElementById('gps-dop').textContent = `${d.gps.hdop} / ${d.gps.pdop}`;
+    document.getElementById('gps-fix-time').textContent = d.gps.fix_time;
     document.getElementById('gps-satellite-detail').textContent = d.gps.satellite_detail || 'No satellite details';
+    document.getElementById('satellite-status').textContent = d.gps.satellite_status;
     updateGpsMap(d.gps);
     updateSatelliteGraphics(d.gps.satellite_data);
     document.getElementById('active-mode').textContent = d.mode === 'telemetry' ? 'GPS telemetry' : d.mode === 'corrections' ? 'RTCM corrections' : 'Stopped';
@@ -596,7 +658,7 @@ setInterval(refresh, 4000);
 
 @app.route("/")
 def index():
-    return render_template_string(HTML)
+    return render_template_string(HTML, version=APP_VERSION)
 
 @app.route("/api/data")
 def api_data():
@@ -616,6 +678,7 @@ def api_data():
         pass
 
     return jsonify({
+        "version": APP_VERSION,
         "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "hostname": socket.gethostname(),
         "uptime": get_uptime(),
