@@ -26,6 +26,7 @@ Dashboard version: **0.2.0** (`dashboard/VERSION`)
 ```bash
 git clone https://github.com/DirectedHunt42/RTK-Base.git
 cd RTK-Base
+chmod +x setup.sh
 sudo ./setup.sh
 ```
 
