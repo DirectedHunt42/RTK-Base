@@ -7,6 +7,7 @@ Simple, reliable DIY RTK Base Station for Raspberry Pi + u-blox GNSS receiver.
 - Streams RTCM 3 (MSM7) over TCP on port **2101**
 - Automatic start on boot via systemd
 - Live web diagnostics dashboard (terminal theme)
+- Dashboard available at `http://<raspberry-pi-ip>` on the standard web port
 - One-command setup
 
 ## Hardware
