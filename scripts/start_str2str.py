@@ -12,30 +12,21 @@ PORT_FILE = Path("/var/lib/rtk-base/stream-port")
 DEFAULT_PORT = 2101
 PORT_LIMIT = 2120
 DEVICE = os.environ.get("RTK_BASE_GNSS_DEVICE", "")
-POSITION = os.environ.get("RTK_BASE_POSITION", "").split()
 
 
 def str2str_args(port: int) -> list[str]:
-    # Convert UBX raw observations to RTCM 3. Station coordinates are needed
-    # for RTCM 1005; do not advertise a fabricated (0, 0, 0) reference point.
-    messages = "1077(1),1087(1),1097(1),1127(1),1230(10)"
     # RTKLIB's serial stream handler prefixes the port with /dev/, so pass a
     # device path relative to /dev even when setup stored an absolute path.
+    # HERE 3 base receivers already output RTCM; forward it unchanged instead
+    # of asking RTKLIB to decode it as UBX and generate a second RTCM stream.
     serial_device = DEVICE.removeprefix("/dev/")
-    args = [STR2STR, "-in", f"serial://{serial_device}:115200#ubx"]
-    if len(POSITION) == 3:
-        try:
-            latitude, longitude, height = map(float, POSITION)
-        except ValueError as exc:
-            raise ValueError("RTK_BASE_POSITION must contain latitude longitude height") from exc
-        if not (-90 <= latitude <= 90 and -180 <= longitude <= 180):
-            raise ValueError("RTK_BASE_POSITION latitude/longitude is out of range")
-        messages = "1005(10)," + messages
-        args.extend(["-p", str(latitude), str(longitude), str(height)])
-    elif POSITION:
-        raise ValueError("RTK_BASE_POSITION must contain latitude longitude height")
-    args.extend(["-msg", messages, "-out", f"tcpsvr://:{port}#rtcm3"])
-    return args
+    return [
+        STR2STR,
+        "-in",
+        f"serial://{serial_device}:115200",
+        "-out",
+        f"tcpsvr://:{port}",
+    ]
 
 
 def main() -> int:
@@ -64,11 +55,7 @@ def main() -> int:
     temp_file = PORT_FILE.with_suffix(".tmp")
     temp_file.write_text(f"{selected_port}\n", encoding="ascii")
     os.replace(temp_file, PORT_FILE)
-    try:
-        args = str2str_args(selected_port)
-    except ValueError as exc:
-        print(str(exc), file=sys.stderr)
-        return 1
+    args = str2str_args(selected_port)
     print(f"Starting str2str: {DEVICE} -> RTCM 3 on TCP port {selected_port}", flush=True)
     os.execv(STR2STR, args)
     return 0

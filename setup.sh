@@ -57,15 +57,7 @@ if [ -z "$GNSS_DEVICE" ]; then
   echo "No GNSS serial receiver found. Connect it and rerun setup." >&2
   exit 1
 fi
-if [ -z "${RTK_BASE_POSITION:-}" ] && [ -r /etc/default/rtk-base ]; then
-  RTK_BASE_POSITION="$(sed -n 's/^RTK_BASE_POSITION=//p' /etc/default/rtk-base | head -n 1 | tr -d '\"')"
-fi
-{
-  printf 'RTK_BASE_GNSS_DEVICE=%s\n' "$GNSS_DEVICE"
-  if [ -n "${RTK_BASE_POSITION:-}" ]; then
-    printf 'RTK_BASE_POSITION=%s\n' "$RTK_BASE_POSITION"
-  fi
-} > /etc/default/rtk-base
+printf 'RTK_BASE_GNSS_DEVICE=%s\n' "$GNSS_DEVICE" > /etc/default/rtk-base
 echo "Using GNSS receiver: $GNSS_DEVICE"
 echo "Dashboard service account: $DASHBOARD_USER"
 mkdir -p /opt/rtk-base
@@ -115,7 +107,4 @@ echo "  Setup complete!"
 echo "========================================"
 echo "RTCM stream : tcp://$(hostname -I | awk '{print $1}'):$(cat /var/lib/rtk-base/stream-port)"
 echo "Dashboard   : http://$(hostname -I | awk '{print $1}')"
-if [ -z "${RTK_BASE_POSITION:-}" ]; then
-  echo "Note: set RTK_BASE_POSITION='latitude longitude height' in /etc/default/rtk-base and restart str2str to include the required RTCM reference-position message."
-fi
 echo ""

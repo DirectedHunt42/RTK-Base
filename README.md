@@ -75,40 +75,26 @@ dashboard permission to switch only between these two modes. The system GPSD
 socket service is disabled so it cannot claim the receiver port independently.
 Anyone with access to the dashboard can change the active mode.
 
-In corrections mode, `str2str` converts UBX raw observations to RTCM 3. The
-receiver must provide UBX raw observation and navigation messages, and be
-configured for stationary base operation. To include RTCM message 1005, set
-the antenna's surveyed position (latitude, longitude, height in metres) in
-`/etc/default/rtk-base` as `RTK_BASE_POSITION="<lat> <lon> <height>"`, then run
-`sudo systemctl restart str2str`. Without a known position, the service omits
-1005 instead of publishing an invalid zero coordinate; Mission Planner needs a
-valid reference position before it can compute an RTK solution. Receiver
-configuration differs by model and firmware, so setup does not change receiver
-settings automatically.
+In corrections mode, `str2str` forwards the receiver's RTCM 3 stream unchanged
+over TCP. Configure the receiver as an RTK base and make sure its serial/USB
+connection outputs RTCM 3 messages, including observation messages and a valid
+reference-position message such as RTCM 1005. Setup does not change receiver
+settings; those are saved on the receiver itself. Mission Planner needs valid
+base-position and observation messages to compute an RTK solution.
 
 ### Receiver readiness and first run
 
 Before expecting an RTK solution, confirm all of the following:
 
 1. The receiver is connected to a GNSS antenna with a clear view of the sky.
-2. The receiver is configured to output UBX raw observations and navigation
-   data on its USB/serial connection. For u-blox devices, these are commonly
-   UBX-RXM-RAWX and UBX-RXM-SFRBX messages; exact setup depends on receiver
-   model and firmware.
-3. The receiver is configured for stationary base use and has a valid base
-   position. A surveyed fixed position gives the best absolute accuracy. A
-   receiver's survey-in feature can establish an approximate position if
-   configured and allowed to complete; keep the antenna stationary during
-   survey-in.
-4. The antenna position is set in `/etc/default/rtk-base` as described above
-   so `str2str` can include RTCM 1005.
+2. The receiver is configured as a stationary base and outputs RTCM 3 on its
+   USB/serial connection. The stream should include observation messages such
+   as GPS MSM and a valid base reference-position message such as RTCM 1005.
+3. The base position has been surveyed or fixed in the receiver's own base
+   configuration. Keep the antenna stationary during survey-in.
 
-For a u-blox receiver, configure and save these settings with the appropriate
-u-blox configuration tool for its generation. Setup intentionally does not
-send receiver configuration commands because the supported models use
-different settings and protocols. The [ZED-F9P integration manual](https://content.u-blox.com/sites/default/files/ZED-F9P_IntegrationManual_UBX-18010802.pdf)
-describes stationary base mode, survey-in, reference-position messages, and
-RTCM output configuration for that receiver family.
+Receiver setup differs by model. The [CubePilot HERE 3 manual](https://github.com/CubePilot/cubepilot-docs/blob/master/here-3/here-3-manual.md)
+describes its base-station survey and RTCM status workflow.
 
 After setup, use these commands to check the Pi-side services and stream:
 
@@ -120,7 +106,7 @@ sudo systemctl status str2str rtk-dashboard nginx
 cat /var/lib/rtk-base/stream-port
 sudo ss -ltnp
 
-# Inspect receiver and conversion messages
+# Inspect receiver and stream status
 sudo journalctl -u str2str -n 50 --no-pager
 ```
 
