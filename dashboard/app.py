@@ -4,8 +4,8 @@ RTK-Base Live Diagnostics Dashboard
 Terminal-style web interface
 """
 
-from flask import Flask, render_template_string, jsonify
-import subprocess, os, socket, psutil
+from flask import Flask, render_template_string, jsonify, request
+import json, subprocess, os, socket, psutil
 from datetime import datetime, timedelta
 
 app = Flask(__name__)
@@ -30,7 +30,7 @@ def get_str2str():
     return status, journal
 
 def get_listening() -> str:
-    return run("ss -ltnp | grep -E ':2101|:8080' || true")
+    return run("ss -ltnp | grep -E ':2101|:2948|:8080' || true")
 
 def get_usb() -> str:
     return run("lsusb") or "No USB devices found"
@@ -39,7 +39,87 @@ def get_serial() -> str:
     return run("ls -l /dev/serial/by-id/ 2>/dev/null") or "No serial devices"
 
 def get_network() -> str:
-    return run("ip -4 addr show | grep -E 'inet '")
+    try:
+        routes = run("ip -4 route show default")
+        default_iface = next((part.split()[4] for part in routes.splitlines()
+                              if len(part.split()) >= 5 and part.split()[0] == "default"), None)
+        lines = []
+        for name, addresses in psutil.net_if_addrs().items():
+            stats = psutil.net_if_stats().get(name)
+            ipv4 = [address.address for address in addresses
+                    if address.family == socket.AF_INET and not address.address.startswith("127.")]
+            if not ipv4:
+                continue
+            state = "up" if stats and stats.isup else "down"
+            role = "default route" if name == default_iface else ""
+            lines.append(f"{name}: {', '.join(ipv4)} [{state}] {role}".rstrip())
+        return "\n".join(lines) or "No network interfaces with IPv4 addresses"
+    except Exception:
+        return "Network interface details unavailable"
+
+def get_gps_data() -> dict:
+    """Read optional GPSD telemetry without opening the receiver serial port."""
+    result = {
+        "source": "GPSD telemetry mode",
+        "fix": "No GPSD data",
+        "position": "—",
+        "altitude": "—",
+        "speed": "—",
+        "satellites": "—",
+        "satellite_detail": "",
+    }
+    try:
+        with socket.create_connection(("127.0.0.1", 2948), timeout=0.5) as conn:
+            conn.settimeout(0.5)
+            conn.sendall(b'?WATCH={"enable":true,"json":true};\n')
+            stream = conn.makefile("r", encoding="utf-8", errors="replace")
+            tpv = None
+            sky = None
+            for _ in range(30):
+                line = stream.readline()
+                if not line:
+                    break
+                try:
+                    message = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if message.get("class") == "TPV":
+                    tpv = message
+                elif message.get("class") == "SKY":
+                    sky = message
+                if tpv and sky:
+                    break
+            if tpv or sky:
+                mode = (tpv or {}).get("mode", 0)
+                result["fix"] = {0: "No fix", 1: "No fix", 2: "2D fix", 3: "3D fix"}.get(mode, f"Mode {mode}")
+                if tpv and "lat" in tpv and "lon" in tpv:
+                    result["position"] = f"{tpv['lat']:.6f}, {tpv['lon']:.6f}"
+                if tpv and "alt" in tpv:
+                    result["altitude"] = f"{tpv['alt']:.1f} m"
+                if tpv and "speed" in tpv:
+                    result["speed"] = f"{tpv['speed']:.2f} m/s"
+                satellites = (sky or {}).get("satellites", [])
+                used = [sat for sat in satellites if sat.get("used")]
+                result["satellites"] = f"{len(used)} used / {len(satellites)} visible"
+                if satellites:
+                    result["satellite_detail"] = "\n".join(
+                        f"{'USED ' if sat.get('used') else ''}"
+                        f"{sat.get('gnssid', '')}{sat.get('svid', sat.get('PRN', '?'))}: "
+                        f"SNR {sat.get('ss', '—')} dB-Hz"
+                        for sat in satellites
+                    )
+                return result
+    except (OSError, socket.timeout):
+        pass
+    result["source"] = "No GPSD telemetry; switch to GPS telemetry mode"
+    return result
+
+def get_mode() -> str:
+    if run("systemctl is-active rtk-gpsd.service 2>/dev/null") == "active":
+        return "telemetry"
+    if run("systemctl is-active str2str.service 2>/dev/null") == "active":
+        return "corrections"
+    return "stopped"
 
 def get_uptime() -> str:
     try:
@@ -179,6 +259,19 @@ HTML = r"""
     border-radius: 4px;
     transition: width 0.6s ease;
   }
+  .mode-controls { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+  .mode-controls button {
+    background: #111;
+    border: 1px solid #28523f;
+    border-radius: 5px;
+    color: var(--green);
+    cursor: pointer;
+    font: inherit;
+    padding: 7px 10px;
+  }
+  .mode-controls button:hover, .mode-controls button.active { background: #002211; border-color: var(--green); }
+  .mode-controls button:disabled { cursor: wait; opacity: 0.55; }
+  .mode-message { color: var(--amber); min-height: 1.5em; }
   footer {
     margin-top: 40px;
     text-align: center;
@@ -218,6 +311,23 @@ HTML = r"""
       <h2>str2str Service</h2>
       <div class="metric"><span>Status</span><span id="str-status" class="status">–</span></div>
       <pre id="str-log" style="margin-top:12px; max-height:180px; overflow:auto; color:#aaa;"></pre>
+    </div>
+
+    <div class="card">
+      <h2>GNSS / GPS</h2>
+      <div class="metric"><span>Active mode</span><span id="active-mode">—</span></div>
+      <div class="mode-controls">
+        <button id="corrections-mode" onclick="setMode('corrections')">RTCM corrections</button>
+        <button id="telemetry-mode" onclick="setMode('telemetry')">GPS telemetry</button>
+      </div>
+      <div id="mode-message" class="mode-message" role="status"></div>
+      <div class="metric"><span>Telemetry</span><span id="gps-source">—</span></div>
+      <div class="metric"><span>Fix</span><span id="gps-fix">—</span></div>
+      <div class="metric"><span>Position</span><span id="gps-position">—</span></div>
+      <div class="metric"><span>Altitude</span><span id="gps-altitude">—</span></div>
+      <div class="metric"><span>Speed</span><span id="gps-speed">—</span></div>
+      <div class="metric"><span>Satellites</span><span id="gps-satellites">—</span></div>
+      <pre id="gps-satellite-detail" style="margin-top:12px; max-height:140px; overflow:auto; color:#aaa;"></pre>
     </div>
 
     <div class="card">
@@ -270,8 +380,41 @@ async function refresh() {
     document.getElementById('ports').textContent = d.ports || 'No RTK ports listening';
     document.getElementById('usb').textContent = d.usb;
     document.getElementById('serial').textContent = d.serial;
+    document.getElementById('gps-source').textContent = d.gps.source;
+    document.getElementById('gps-fix').textContent = d.gps.fix;
+    document.getElementById('gps-position').textContent = d.gps.position;
+    document.getElementById('gps-altitude').textContent = d.gps.altitude;
+    document.getElementById('gps-speed').textContent = d.gps.speed;
+    document.getElementById('gps-satellites').textContent = d.gps.satellites;
+    document.getElementById('gps-satellite-detail').textContent = d.gps.satellite_detail || 'No satellite details';
+    document.getElementById('active-mode').textContent = d.mode === 'telemetry' ? 'GPS telemetry' : d.mode === 'corrections' ? 'RTCM corrections' : 'Stopped';
+    document.getElementById('corrections-mode').classList.toggle('active', d.mode === 'corrections');
+    document.getElementById('telemetry-mode').classList.toggle('active', d.mode === 'telemetry');
   } catch (e) {
     console.error(e);
+  }
+}
+async function setMode(mode) {
+  const buttons = document.querySelectorAll('.mode-controls button');
+  buttons.forEach(button => button.disabled = true);
+  const message = document.getElementById('mode-message');
+  message.textContent = 'Switching mode…';
+  try {
+    const response = await fetch('/api/mode', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode })
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || 'Mode switch failed');
+    message.textContent = mode === 'telemetry'
+      ? 'GPS telemetry active. RTCM corrections are paused.'
+      : 'RTCM corrections active. GPS telemetry is paused.';
+    await refresh();
+  } catch (error) {
+    message.textContent = error.message;
+  } finally {
+    buttons.forEach(button => button.disabled = false);
   }
 }
 refresh();
@@ -320,7 +463,26 @@ def api_data():
         "ports": get_listening(),
         "usb": get_usb(),
         "serial": get_serial(),
+        "gps": get_gps_data(),
+        "mode": get_mode(),
     })
+
+@app.route("/api/mode", methods=["POST"])
+def api_mode():
+    payload = request.get_json(silent=True) or {}
+    mode = payload.get("mode")
+    if mode not in ("corrections", "telemetry"):
+        return jsonify({"error": "Mode must be corrections or telemetry"}), 400
+    try:
+        result = subprocess.run(
+            ["sudo", "/usr/local/sbin/rtk-base-set-mode", mode],
+            capture_output=True, text=True, timeout=15, check=False
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return jsonify({"error": "Could not run the mode switch command"}), 500
+    if result.returncode != 0:
+        return jsonify({"error": result.stderr.strip() or "Mode switch failed"}), 500
+    return jsonify({"mode": get_mode()})
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8080, debug=False)
