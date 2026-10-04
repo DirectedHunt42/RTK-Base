@@ -35,17 +35,29 @@ def get_str2str():
 def get_listening() -> str:
     return run("ss -ltnp | grep -E ':2101|:2948|:8080' || true")
 
+def get_rtcm_client_count() -> int:
+    connections = run("ss -Htn state established '( sport = :2101 )'")
+    return len(connections.splitlines()) if connections else 0
+
+def get_service_restarts() -> str:
+    return run("systemctl show str2str.service -p NRestarts --value") or "0"
+
 def get_usb() -> str:
     return run("lsusb") or "No USB devices found"
 
 def get_serial() -> str:
     return run("ls -l /dev/serial/by-id/ 2>/dev/null") or "No serial devices"
 
+def get_default_interface():
+    for route in run("ip -4 route show default").splitlines():
+        parts = route.split()
+        if parts and parts[0] == "default" and "dev" in parts:
+            return parts[parts.index("dev") + 1]
+    return None
+
 def get_network() -> str:
     try:
-        routes = run("ip -4 route show default")
-        default_iface = next((part.split()[4] for part in routes.splitlines()
-                              if len(part.split()) >= 5 and part.split()[0] == "default"), None)
+        default_iface = get_default_interface()
         lines = []
         for name, addresses in psutil.net_if_addrs().items():
             stats = psutil.net_if_stats().get(name)
@@ -59,6 +71,61 @@ def get_network() -> str:
         return "\n".join(lines) or "No network interfaces with IPv4 addresses"
     except Exception:
         return "Network interface details unavailable"
+
+def get_wifi_data() -> dict:
+    wireless = [name for name in psutil.net_if_addrs()
+                if os.path.isdir(f"/sys/class/net/{name}/wireless")]
+    default_iface = get_default_interface()
+    iface = default_iface if default_iface in wireless else next(
+        (name for name in wireless if psutil.net_if_stats().get(name, None)
+         and psutil.net_if_stats()[name].isup),
+        wireless[0] if wireless else None
+    )
+    result = {"interface": iface or "—", "ssid": "—", "signal": "—",
+              "quality": 0, "link": "No wireless interface detected"}
+    if not iface:
+        return result
+    result["link"] = "Not connected"
+    try:
+        output = subprocess.check_output(
+            ["iw", "dev", iface, "link"], text=True,
+            stderr=subprocess.DEVNULL, timeout=1
+        )
+    except (OSError, subprocess.SubprocessError):
+        result["link"] = "Wireless status unavailable (iw)"
+        return result
+    if output.strip().startswith("Not connected"):
+        return result
+    result["link"] = "Connected"
+    for line in output.splitlines():
+        line = line.strip()
+        if line.startswith("SSID:"):
+            result["ssid"] = line.split(":", 1)[1].strip()
+        elif line.startswith("signal:"):
+            fields = line.split()
+            if len(fields) > 1:
+                try:
+                    dbm = float(fields[1])
+                    result["signal"] = f"{dbm:.0f} dBm"
+                    result["quality"] = max(0, min(100, round((dbm + 100) * 2)))
+                except ValueError:
+                    pass
+        elif line.startswith("freq:"):
+            result["frequency"] = f"{line.split(':', 1)[1].strip()} MHz"
+        elif line.startswith("tx bitrate:"):
+            result["bitrate"] = line.split(":", 1)[1].strip()
+    return result
+
+def get_network_traffic() -> dict:
+    iface = get_default_interface()
+    counters = psutil.net_io_counters(pernic=True).get(iface) if iface else None
+    if not counters:
+        return {"interface": iface or "—", "received": "—", "sent": "—"}
+    return {
+        "interface": iface,
+        "received": f"{counters.bytes_recv / (1024 ** 2):.1f} MiB",
+        "sent": f"{counters.bytes_sent / (1024 ** 2):.1f} MiB",
+    }
 
 def satellite_label(satellite: dict) -> str:
     gnssid = satellite.get("gnssid")
@@ -283,11 +350,15 @@ HTML = r"""
     flex: 0 0 auto;
   }
   .card h2::before {
+    display: inline-block;
+    transform: rotate(90deg);
+    transition: transform 0.2s ease;
     content: "▶";
     color: var(--green);
     font-size: 0.65rem;
   }
   pre {
+    /* Keep diagnostic text panels within their card's available height. */
     white-space: pre-wrap;
     word-break: break-all;
     font-size: 12px;
@@ -296,6 +367,10 @@ HTML = r"""
   .scroll-fill { flex: 1 1 auto; min-height: 100px; overflow: auto; }
   .scroll-stack { display: flex; flex: 1 1 auto; min-height: 180px; flex-direction: column; gap: 12px; }
   .scroll-stack > .scroll-fill { min-height: 70px; }
+  .card.collapsed > :not(h2) { display: none; }
+  .card h2[role="button"] { cursor: pointer; user-select: none; }
+  .card h2[role="button"]:focus-visible { outline: 1px solid var(--green); outline-offset: 4px; }
+  .card.collapsed h2::before { transform: rotate(0deg); }
   .status {
     display: inline-block;
     padding: 3px 10px;
@@ -328,6 +403,8 @@ HTML = r"""
     border-radius: 4px;
     transition: width 0.6s ease;
   }
+  .wifi-bar { margin: 4px 0 10px; }
+  .wifi-bar .bar-fill { background: linear-gradient(90deg, #ff5555, #ffb000, #00ff9f); }
   .mode-controls { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
   .mode-controls button {
     background: #111;
@@ -386,6 +463,10 @@ HTML = r"""
       <div class="metric"><span>Uptime</span><span id="uptime">–</span></div>
       <div class="metric"><span>Temperature</span><span id="temp">–</span></div>
       <div class="metric"><span>Primary IP</span><span id="ip">–</span></div>
+      <div class="metric"><span>RTCM output</span><span id="rtcm-port">TCP :2101</span></div>
+      <div class="metric"><span>RTCM clients</span><span id="rtcm-clients">—</span></div>
+      <div class="metric"><span>Dashboard</span><span>HTTP :80</span></div>
+      <div class="metric"><span>Stream restarts</span><span id="str-restarts">—</span></div>
     </div>
 
     <div class="card">
@@ -397,6 +478,14 @@ HTML = r"""
       <div class="metric"><span>Disk</span><span id="disk">–</span></div>
       <div class="bar"><div class="bar-fill" id="disk-bar" style="width:0%"></div></div>
       <div class="metric"><span>Load (1 / 5 / 15)</span><span id="load">–</span></div>
+      <div class="metric"><span>Wi-Fi interface</span><span id="wifi-interface">—</span></div>
+      <div class="metric"><span>Network</span><span id="wifi-ssid">—</span></div>
+      <div class="metric"><span>Signal</span><span id="wifi-signal">—</span></div>
+      <div class="bar wifi-bar"><div class="bar-fill" id="wifi-bar" style="width:0%"></div></div>
+      <div class="metric"><span>Wi-Fi link</span><span id="wifi-link">—</span></div>
+      <div class="metric"><span>Frequency</span><span id="wifi-frequency">—</span></div>
+      <div class="metric"><span>TX rate</span><span id="wifi-bitrate">—</span></div>
+      <div class="metric"><span>RX / TX since boot</span><span id="net-traffic">—</span></div>
     </div>
 
     <div class="card">
@@ -478,6 +567,45 @@ HTML = r"""
 let gpsMap = null;
 let gpsMarker = null;
 let mapHasFix = false;
+
+function setPanelCollapsed(header, collapsed) {
+  const panel = header.closest('.card');
+  panel.classList.toggle('collapsed', collapsed);
+  header.setAttribute('aria-expanded', String(!collapsed));
+  try {
+    localStorage.setItem(`rtk-panel:${header.textContent.trim()}`, collapsed ? 'closed' : 'open');
+  } catch (error) { /* Storage can be unavailable in private browsing modes. */ }
+  if (!collapsed && panel.querySelector('#gps-map') && gpsMap) {
+    window.setTimeout(() => gpsMap.invalidateSize(), 50);
+  }
+}
+
+function setupCollapsiblePanels() {
+  document.querySelectorAll('.card > h2').forEach(header => {
+    header.setAttribute('role', 'button');
+    header.setAttribute('tabindex', '0');
+    const key = `rtk-panel:${header.textContent.trim()}`;
+    try {
+      if (localStorage.getItem(key) === 'closed') {
+        header.closest('.card').classList.add('collapsed');
+        header.setAttribute('aria-expanded', 'false');
+      } else {
+        header.setAttribute('aria-expanded', 'true');
+      }
+    } catch (error) {
+      header.setAttribute('aria-expanded', 'true');
+    }
+    header.addEventListener('click', () => {
+      setPanelCollapsed(header, header.getAttribute('aria-expanded') === 'true');
+    });
+    header.addEventListener('keydown', event => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        header.click();
+      }
+    });
+  });
+}
 
 function initializeMap() {
   const note = document.getElementById('map-note');
@@ -596,6 +724,17 @@ async function refresh() {
     document.getElementById('disk').textContent = d.disk;
     document.getElementById('disk-bar').style.width = d.disk_pct + '%';
     document.getElementById('load').textContent = d.load;
+    document.getElementById('rtcm-port').textContent = `TCP :${d.rtcm_port}`;
+    document.getElementById('rtcm-clients').textContent = d.rtcm_clients;
+    document.getElementById('str-restarts').textContent = d.str_restarts;
+    document.getElementById('wifi-interface').textContent = d.wifi.interface;
+    document.getElementById('wifi-ssid').textContent = d.wifi.ssid;
+    document.getElementById('wifi-signal').textContent = d.wifi.signal;
+    document.getElementById('wifi-bar').style.width = `${d.wifi.quality}%`;
+    document.getElementById('wifi-link').textContent = d.wifi.link;
+    document.getElementById('wifi-frequency').textContent = d.wifi.frequency || '—';
+    document.getElementById('wifi-bitrate').textContent = d.wifi.bitrate || '—';
+    document.getElementById('net-traffic').textContent = `${d.network_traffic.received} / ${d.network_traffic.sent} (${d.network_traffic.interface})`;
 
     const st = document.getElementById('str-status');
     st.textContent = d.str_status.toUpperCase();
@@ -649,6 +788,7 @@ async function setMode(mode) {
     buttons.forEach(button => button.disabled = false);
   }
 }
+setupCollapsiblePanels();
 refresh();
 setInterval(refresh, 4000);
 </script>
@@ -690,6 +830,11 @@ def api_data():
         "disk": f"{disk.used // 1024 // 1024 // 1024:.1f} / {disk.total // 1024 // 1024 // 1024:.1f} GB ({disk.percent}%)",
         "disk_pct": disk.percent,
         "load": f"{load[0]:.2f}   {load[1]:.2f}   {load[2]:.2f}",
+        "rtcm_port": 2101,
+        "rtcm_clients": get_rtcm_client_count(),
+        "str_restarts": get_service_restarts(),
+        "wifi": get_wifi_data(),
+        "network_traffic": get_network_traffic(),
         "str_status": str_status,
         "str_log": str_log,
         "network": get_network(),

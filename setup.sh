@@ -13,7 +13,7 @@ fi
 
 echo "[1/7] Installing dependencies..."
 apt update
-apt install -y python3-flask python3-psutil nginx gpsd sudo
+apt install -y python3-flask python3-psutil nginx gpsd sudo iw
 
 echo "[2/7] Creating directories..."
 mkdir -p /opt/rtk-base

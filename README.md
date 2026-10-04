@@ -9,6 +9,8 @@ Planner.
 - Streams RTCM 3 over TCP on port **2101**
 - Starts the RTCM stream and diagnostics dashboard at boot
 - Live system and network diagnostics, plus switchable GPS telemetry
+- Wi-Fi link strength and network traffic counters
+- Collapsible dashboard panels
 - Dashboard available on the standard HTTP port
 - Satellite sky view, signal strengths, and receiver position map in telemetry mode
 
@@ -64,6 +66,12 @@ estimated accuracy and fix time. The map and its tiles need an internet
 connection; the GPS and satellite graphics use the receiver's GPSD data. The
 GPSD sky view reports visible satellites and marks which ones are used in the
 current fix.
+
+The Resources panel shows Wi-Fi signal in dBm, a rough signal meter, link rate,
+frequency, and total traffic on the default network interface since boot. The
+System panel shows the RTCM output port, connected RTCM clients, and stream
+restart count. Select any panel heading to collapse or expand it; that choice
+is remembered in the browser.
 
 ## Useful commands
 
