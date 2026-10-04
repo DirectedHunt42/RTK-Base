@@ -19,7 +19,10 @@ def str2str_args(port: int) -> list[str]:
     # Convert UBX raw observations to RTCM 3. Station coordinates are needed
     # for RTCM 1005; do not advertise a fabricated (0, 0, 0) reference point.
     messages = "1077(1),1087(1),1097(1),1127(1),1230(10)"
-    args = [STR2STR, "-in", f"serial://{DEVICE}:115200#ubx"]
+    # RTKLIB's serial stream handler prefixes the port with /dev/, so pass a
+    # device path relative to /dev even when setup stored an absolute path.
+    serial_device = DEVICE.removeprefix("/dev/")
+    args = [STR2STR, "-in", f"serial://{serial_device}:115200#ubx"]
     if len(POSITION) == 3:
         try:
             latitude, longitude, height = map(float, POSITION)
