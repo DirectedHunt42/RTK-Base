@@ -59,6 +59,7 @@ HTML = r"""
 <style>
   @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&display=swap');
   :root {
+    color-scheme: dark;
     --bg: #0a0a0a;
     --card: #111111;
     --border: #1e1e1e;
@@ -67,6 +68,28 @@ HTML = r"""
     --red: #ff5555;
     --text: #d0d0d0;
     --dim: #666666;
+  }
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: #28523f var(--bg);
+  }
+  *::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  *::-webkit-scrollbar-track {
+    background: var(--bg);
+  }
+  *::-webkit-scrollbar-thumb {
+    background: #28523f;
+    border: 2px solid var(--bg);
+    border-radius: 8px;
+  }
+  *::-webkit-scrollbar-thumb:hover {
+    background: var(--green);
+  }
+  *::-webkit-scrollbar-corner {
+    background: var(--bg);
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body {
