@@ -55,6 +55,11 @@ dashboard permission to switch only between these two modes. The system GPSD
 socket service is disabled so it cannot claim the receiver port independently.
 Anyone with access to the dashboard can change the active mode.
 
+GPS telemetry mode also shows the receiver on an interactive OpenStreetMap
+map, with a satellite sky plot and signal-strength bars. The map and its tiles
+need an internet connection; the GPS and satellite graphics use the receiver's
+GPSD data.
+
 ## Useful commands
 
 ```bash
