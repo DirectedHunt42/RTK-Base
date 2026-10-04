@@ -1,0 +1,13 @@
+[Unit]
+Description=RTK Base Diagnostics Dashboard
+After=network.target
+
+[Service]
+User=pi
+WorkingDirectory=/opt/rtk-base/dashboard
+ExecStart=/usr/bin/python3 /opt/rtk-base/dashboard/app.py
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
