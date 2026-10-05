@@ -1231,6 +1231,9 @@ async function updatePi() {
 async function openFileDialog() {
   const backdrop = document.getElementById('file-dialog-backdrop');
   const list = document.getElementById('file-download-list');
+  const scrollbarWidth = window.innerWidth - document.documentElement.clientWidth;
+  const bodyPaddingRight = parseFloat(getComputedStyle(document.body).paddingRight) || 0;
+  document.body.style.paddingRight = `${bodyPaddingRight + scrollbarWidth}px`;
   backdrop.hidden = false;
   document.body.style.overflow = 'hidden';
   document.getElementById('file-dialog-message').textContent = '';
@@ -1278,6 +1281,7 @@ async function loadRepoFiles() {
 function closeFileDialog() {
   document.getElementById('file-dialog-backdrop').hidden = true;
   document.body.style.overflow = '';
+  document.body.style.paddingRight = '';
   document.getElementById('files-button').focus();
 }
 function handleFileDialogBackdrop(event) {
