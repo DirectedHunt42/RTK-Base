@@ -10,6 +10,8 @@ if [ "$EUID" -ne 0 ]; then
   echo "Please run with sudo:  sudo ./setup.sh"
   exit 1
 fi
+REPO_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+cd "$REPO_DIR"
 
 DASHBOARD_USER="${SUDO_USER:-pi}"
 if ! id "$DASHBOARD_USER" >/dev/null 2>&1; then
@@ -72,7 +74,10 @@ cp services/rtk-gpsd.service /etc/systemd/system/
 cp services/rtk-base-nginx.conf /etc/nginx/sites-available/rtk-base
 install -o root -g root -m 0755 scripts/set_mode.sh /usr/local/sbin/rtk-base-set-mode
 install -o root -g root -m 0755 scripts/start_str2str.py /usr/local/sbin/rtk-base-start-str2str
-printf '%s\n' "$DASHBOARD_USER ALL=(root) NOPASSWD: /usr/local/sbin/rtk-base-set-mode corrections, /usr/local/sbin/rtk-base-set-mode telemetry" > /etc/sudoers.d/rtk-base-dashboard
+install -o root -g root -m 0755 scripts/update.sh /usr/local/sbin/rtk-base-update
+printf '%s\n' "$REPO_DIR" > /etc/rtk-base-update-repo
+chmod 0644 /etc/rtk-base-update-repo
+printf '%s\n' "$DASHBOARD_USER ALL=(root) NOPASSWD: /usr/local/sbin/rtk-base-set-mode corrections, /usr/local/sbin/rtk-base-set-mode telemetry, /usr/local/sbin/rtk-base-update, /usr/bin/systemctl reboot" > /etc/sudoers.d/rtk-base-dashboard
 chmod 0440 /etc/sudoers.d/rtk-base-dashboard
 visudo -cf /etc/sudoers.d/rtk-base-dashboard
 ln -sf /etc/nginx/sites-available/rtk-base /etc/nginx/sites-enabled/rtk-base

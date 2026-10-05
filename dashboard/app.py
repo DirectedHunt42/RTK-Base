@@ -5,7 +5,7 @@ Terminal-style web interface
 """
 
 from flask import Flask, render_template_string, jsonify, request
-import json, subprocess, os, socket, psutil
+import json, subprocess, os, socket, psutil, time
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -268,6 +268,40 @@ def get_uptime() -> str:
     except Exception:
         return "N/A"
 
+def get_update_status() -> str:
+    try:
+        status_path = Path("/var/lib/rtk-base/update-status")
+        status = status_path.read_text(encoding="utf-8").strip()
+    except OSError:
+        return "Ready to update."
+    if status.startswith(("Starting RTK-Base update", "Updating RTK-Base")):
+        try:
+            status_age = time.time() - status_path.stat().st_mtime
+        except OSError:
+            return status
+        if status_age > 8 and not update_runner_active():
+            return "Update complete. Dashboard restarted."
+    return status
+
+def update_runner_active() -> bool:
+    try:
+        unit = subprocess.run(
+            ["/usr/bin/systemctl", "show", "--property=ActiveState", "--value", "rtk-base-update.service"],
+            capture_output=True, text=True, timeout=1, check=False
+        )
+        if unit.stdout.strip() in ("active", "activating", "deactivating", "reloading"):
+            return True
+    except (OSError, subprocess.SubprocessError):
+        pass
+    try:
+        for process in psutil.process_iter(["cmdline"]):
+            command = process.info.get("cmdline") or []
+            if any(argument == "/usr/local/sbin/rtk-base-update" for argument in command):
+                return True
+    except (psutil.Error, OSError):
+        pass
+    return False
+
 HTML = r"""
 <!DOCTYPE html>
 <html lang="en">
@@ -325,6 +359,42 @@ HTML = r"""
   }
   header {
     margin-bottom: 28px;
+    position: relative;
+    padding-right: 205px;
+  }
+  .header-actions {
+    position: absolute;
+    top: 4px;
+    right: 0;
+    display: grid;
+    justify-items: end;
+    gap: 4px;
+  }
+  .header-action-buttons { display: flex; gap: 7px; }
+  .dashboard-action {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    background: #111;
+    border: 1px solid #28523f;
+    border-radius: 5px;
+    cursor: pointer;
+    font: inherit;
+    font-weight: 600;
+    padding: 8px 12px;
+  }
+  .dashboard-action img { width: 16px; height: 16px; }
+  .dashboard-action:hover { background: #002211; border-color: var(--green); }
+  .dashboard-action:disabled { cursor: wait; opacity: 0.55; }
+  .update-button { color: var(--green); }
+  .reboot-button { color: var(--red); border-color: #713333; }
+  .reboot-button:hover { background: #3a1111; border-color: var(--red); }
+  #action-message { color: var(--amber); font-size: 11px; text-align: right; }
+  @media (max-width: 600px) {
+    header { padding-right: 0; padding-top: 46px; }
+    .header-actions { left: 0; right: auto; }
+    #action-message { text-align: left; }
+    h1 { font-size: 1.25rem; }
   }
   h1 {
     color: var(--green);
@@ -460,11 +530,63 @@ HTML = r"""
     font-size: 11px;
   }
   #clock { color: var(--amber); }
+  #update-terminal-screen {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 10000;
+    background: #050807;
+    color: var(--green);
+    padding: 22px;
+    font-family: 'JetBrains Mono', monospace;
+  }
+  #update-terminal-screen.active { display: flex; flex-direction: column; }
+  .terminal-heading {
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    border-bottom: 1px solid #28523f;
+    padding-bottom: 12px;
+    color: var(--green);
+    font-weight: 600;
+  }
+  #update-terminal-status { color: var(--amber); font-weight: 400; text-align: right; }
+  #update-terminal-output {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    margin-top: 14px;
+    padding: 12px;
+    border: 1px solid #1e3b2d;
+    background: #080c0a;
+    color: #c8e6d5;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    font: 12px/1.55 'JetBrains Mono', monospace;
+  }
+  @media (max-width: 600px) {
+    #update-terminal-screen { padding: 12px; }
+    .terminal-heading { flex-direction: column; gap: 4px; }
+    #update-terminal-status { text-align: left; }
+  }
 </style>
 </head>
 <body>
   <header>
     <h1>RTK-BASE // DIAGNOSTICS</h1>
+    <div class="header-actions">
+      <div class="header-action-buttons">
+        <button id="update-button" class="dashboard-action update-button" type="button" onclick="updatePi()">
+          <img src="{{ url_for('static', filename='update.svg') }}" alt="" aria-hidden="true">
+          <span>Update</span>
+        </button>
+        <button id="reboot-button" class="dashboard-action reboot-button" type="button" onclick="rebootPi()">
+          <img src="{{ url_for('static', filename='reboot.svg') }}" alt="" aria-hidden="true">
+          <span>Reboot Pi</span>
+        </button>
+      </div>
+      <div id="action-message" role="status" aria-live="polite"></div>
+    </div>
     <div class="subtitle">Live monitor · <span id="clock">–</span> · auto-refresh every 4 s</div>
   </header>
 
@@ -575,10 +697,21 @@ HTML = r"""
     RTK-Base Dashboard v{{ version }} · Raspberry Pi · data refreshes automatically
   </footer>
 
+  <section id="update-terminal-screen" role="dialog" aria-modal="true" aria-labelledby="update-terminal-title">
+    <div class="terminal-heading">
+      <span id="update-terminal-title">RTK-BASE // SYSTEM UPDATE</span>
+      <span id="update-terminal-status" role="status" aria-live="polite">Connecting to updater...</span>
+    </div>
+    <pre id="update-terminal-output" aria-label="Live output from the update and setup scripts"></pre>
+  </section>
+
 <script>
 let gpsMap = null;
 let gpsMarker = null;
 let mapHasFix = false;
+let updateOutputOffset = 0;
+let updatePollTimer = null;
+let updateReturnTimer = null;
 
 function setPanelCollapsed(header, collapsed) {
   const panel = header.closest('.card');
@@ -773,6 +906,9 @@ async function refresh() {
     document.getElementById('active-mode').textContent = d.mode === 'telemetry' ? 'GPS telemetry' : d.mode === 'corrections' ? 'RTCM corrections' : 'Stopped';
     document.getElementById('corrections-mode').classList.toggle('active', d.mode === 'corrections');
     document.getElementById('telemetry-mode').classList.toggle('active', d.mode === 'telemetry');
+    const updateStatus = d.update_status || 'Ready to update.';
+    document.getElementById('action-message').textContent = updateStatus;
+    document.getElementById('update-button').disabled = updateStatus.startsWith('Starting RTK-Base update') || updateStatus.startsWith('Updating RTK-Base');
   } catch (e) {
     console.error(e);
   }
@@ -799,6 +935,74 @@ async function setMode(mode) {
   } finally {
     buttons.forEach(button => button.disabled = false);
   }
+}
+async function rebootPi() {
+  if (!window.confirm('Reboot the Raspberry Pi now? The dashboard and RTCM stream will be unavailable briefly.')) return;
+  const button = document.getElementById('reboot-button');
+  const message = document.getElementById('action-message');
+  button.disabled = true;
+  message.textContent = 'Sending reboot command...';
+  try {
+    const response = await fetch('/api/reboot', { method: 'POST' });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || 'Reboot failed');
+    message.textContent = 'Rebooting Pi...';
+  } catch (error) {
+    message.textContent = error.message;
+    button.disabled = false;
+  }
+}
+async function updatePi() {
+  if (!window.confirm('Update RTK-Base now? This discards tracked local changes, pulls the latest repository version, and reruns setup.')) return;
+  const button = document.getElementById('update-button');
+  button.disabled = true;
+  updateOutputOffset = 0;
+  document.getElementById('update-terminal-output').textContent = '';
+  document.getElementById('update-terminal-status').textContent = 'Starting update...';
+  document.getElementById('update-terminal-screen').classList.add('active');
+  if (updatePollTimer) window.clearTimeout(updatePollTimer);
+  if (updateReturnTimer) window.clearTimeout(updateReturnTimer);
+  try {
+    const response = await fetch('/api/update', { method: 'POST' });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || 'Update failed to start');
+    document.getElementById('update-terminal-status').textContent = 'Running update script...';
+    pollUpdateOutput();
+  } catch (error) {
+    document.getElementById('update-terminal-output').textContent = `${error.message}\n`;
+    document.getElementById('update-terminal-status').textContent = 'Could not start update.';
+    updateReturnTimer = window.setTimeout(closeUpdateTerminal, 2500);
+  }
+}
+function closeUpdateTerminal() {
+  document.getElementById('update-terminal-screen').classList.remove('active');
+  document.getElementById('update-button').disabled = false;
+  if (updatePollTimer) window.clearTimeout(updatePollTimer);
+  updatePollTimer = null;
+}
+async function pollUpdateOutput() {
+  try {
+    const response = await fetch(`/api/update/output?offset=${updateOutputOffset}`, { cache: 'no-store' });
+    if (!response.ok) throw new Error('Update output endpoint unavailable');
+    const result = await response.json();
+    if (result.output) {
+      const output = document.getElementById('update-terminal-output');
+      output.textContent += result.output;
+      output.scrollTop = output.scrollHeight;
+    }
+    updateOutputOffset = result.offset;
+    document.getElementById('update-terminal-status').textContent = result.status;
+    if (result.done) {
+      updateReturnTimer = window.setTimeout(() => {
+        closeUpdateTerminal();
+        if (result.success) window.location.reload();
+      }, 2200);
+      return;
+    }
+  } catch (error) {
+    document.getElementById('update-terminal-status').textContent = 'Dashboard restarting or reconnecting...';
+  }
+  updatePollTimer = window.setTimeout(pollUpdateOutput, 800);
 }
 setupCollapsiblePanels();
 refresh();
@@ -855,6 +1059,7 @@ def api_data():
         "serial": get_serial(),
         "gps": get_gps_data(),
         "mode": get_mode(),
+        "update_status": get_update_status(),
     })
 
 @app.route("/api/mode", methods=["POST"])
@@ -873,6 +1078,82 @@ def api_mode():
     if result.returncode != 0:
         return jsonify({"error": result.stderr.strip() or "Mode switch failed"}), 500
     return jsonify({"mode": get_mode()})
+
+@app.route("/api/reboot", methods=["POST"])
+def api_reboot():
+    try:
+        result = subprocess.run(
+            ["sudo", "/usr/bin/systemctl", "reboot"],
+            capture_output=True, text=True, timeout=5, check=False
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return jsonify({"error": "Could not run the reboot command"}), 500
+    if result.returncode != 0:
+        return jsonify({"error": result.stderr.strip() or "Reboot command failed"}), 500
+    return jsonify({"status": "rebooting"}), 202
+
+@app.route("/api/update", methods=["POST"])
+def api_update():
+    if get_update_status().startswith(("Starting RTK-Base update", "Updating RTK-Base")):
+        return jsonify({"error": "An RTK-Base update is already running"}), 409
+    log_path = Path("/var/log/rtk-base-update.log")
+    try:
+        previous_log_stat = log_path.stat()
+        previous_log_signature = (previous_log_stat.st_mtime_ns, previous_log_stat.st_size)
+    except OSError:
+        previous_log_signature = None
+    try:
+        subprocess.Popen(
+            ["sudo", "-n", "/usr/local/sbin/rtk-base-update"],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+            close_fds=True,
+        )
+    except OSError:
+        return jsonify({"error": "Could not start the update command"}), 500
+    for _ in range(60):
+        if get_update_status().startswith(("Starting RTK-Base update", "Updating RTK-Base")):
+            return jsonify({"status": "updating"}), 202
+        try:
+            log_stat = log_path.stat()
+            log_signature = (log_stat.st_mtime_ns, log_stat.st_size)
+        except OSError:
+            log_signature = None
+        if log_signature is not None and log_signature != previous_log_signature and log_stat.st_size > 0:
+            return jsonify({"status": "updating"}), 202
+        time.sleep(0.05)
+    return jsonify({"error": "Updater did not start. Check /var/log/rtk-base-update.log."}), 500
+
+@app.route("/api/update/output")
+def api_update_output():
+    try:
+        offset = max(0, int(request.args.get("offset", "0")))
+    except ValueError:
+        return jsonify({"error": "Invalid output offset"}), 400
+
+    output = b""
+    try:
+        with open("/var/log/rtk-base-update.log", "rb") as log_file:
+            log_file.seek(0, os.SEEK_END)
+            size = log_file.tell()
+            offset = min(offset, size)
+            log_file.seek(offset)
+            output = log_file.read(65536)
+    except OSError:
+        pass
+
+    status = get_update_status()
+    success = status in ("Update complete.", "Update complete. Dashboard restarted.")
+    done = success or status.startswith("Update failed")
+    return jsonify({
+        "output": output.decode("utf-8", errors="replace"),
+        "offset": offset + len(output),
+        "status": status,
+        "done": done,
+        "success": success,
+    })
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8080, debug=False)

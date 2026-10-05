@@ -13,9 +13,10 @@ Planner.
 - Wi-Fi link strength and network traffic counters
 - Collapsible dashboard panels
 - Dashboard available on the standard HTTP port
+- Dashboard update control with a live terminal view for the updater and setup output
 - Satellite sky view, signal strengths, and receiver position map in telemetry mode
 
-Dashboard version: **0.3.0** (`dashboard/VERSION`)
+Dashboard version: **0.3.1** (`dashboard/VERSION`)
 
 ## Hardware
 
@@ -37,6 +38,11 @@ Connect the GNSS receiver before running setup; the installer detects its
 `/dev/serial/by-id` device and installs RTKLIB (`str2str`), GPSD, Flask, nginx,
 and the system services automatically. If port 2101 is occupied, the stream
 service tries ports 2102 through 2120 each time it starts.
+
+Use the dashboard's **Update** button to pull the latest repository version
+and rerun setup. Updating runs `git reset --hard` first, so tracked local
+changes in the checkout are discarded. Update progress and errors appear in
+the dashboard; detailed output is logged to `/var/log/rtk-base-update.log`.
 
 Setup checks that it can find the receiver device and that RTKLIB's `str2str`
 executable was installed. It enables and starts the services, then prints their
