@@ -4,7 +4,7 @@ RTK-Base Live Diagnostics Dashboard
 Terminal-style web interface
 """
 
-from flask import Flask, render_template_string, jsonify, request
+from flask import Flask, render_template_string, jsonify, request, Response
 import json, subprocess, os, socket, psutil, time
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -302,6 +302,64 @@ def update_runner_active() -> bool:
         pass
     return False
 
+DOWNLOAD_ITEMS = [
+    {"id": "str2str-log", "name": "RTCM stream log", "category": "Logs", "description": "Recent str2str service output", "filename": "str2str.log"},
+    {"id": "dashboard-log", "name": "Dashboard log", "category": "Logs", "description": "Recent Flask dashboard service output", "filename": "rtk-dashboard.log"},
+    {"id": "gpsd-log", "name": "GPSD log", "category": "Logs", "description": "Recent GPS telemetry service output", "filename": "rtk-gpsd.log"},
+    {"id": "nginx-error-log", "name": "nginx error log", "category": "Logs", "description": "Last 1,000 nginx error log lines", "filename": "nginx-error.log"},
+    {"id": "nginx-access-log", "name": "nginx access log", "category": "Logs", "description": "Last 1,000 nginx access log lines", "filename": "nginx-access.log"},
+    {"id": "update-log", "name": "Update log", "category": "Logs", "description": "Recent update and setup output", "filename": "rtk-base-update.log"},
+    {"id": "gnss-config", "name": "GNSS device config", "category": "Configuration", "description": "Selected receiver device path", "filename": "rtk-base.conf"},
+    {"id": "stream-port", "name": "RTCM stream port", "category": "Configuration", "description": "Currently selected RTCM TCP port", "filename": "stream-port.txt"},
+    {"id": "str2str-service", "name": "RTCM stream service", "category": "Configuration", "description": "Installed str2str systemd unit", "filename": "str2str.service"},
+    {"id": "dashboard-service", "name": "Dashboard service", "category": "Configuration", "description": "Installed dashboard systemd unit", "filename": "rtk-dashboard.service"},
+    {"id": "gpsd-service", "name": "GPSD service", "category": "Configuration", "description": "Installed GPSD systemd unit", "filename": "rtk-gpsd.service"},
+    {"id": "nginx-config", "name": "nginx site config", "category": "Configuration", "description": "Installed dashboard reverse proxy config", "filename": "rtk-base-nginx.conf"},
+]
+
+REPO_ASSOCIATIONS = [
+    {"source": "dashboard/", "target": "/opt/rtk-base/dashboard/"},
+    {"source": "scripts/", "target": "/opt/rtk-base/scripts/"},
+    {"source": "scripts/set_mode.sh", "target": "/usr/local/sbin/rtk-base-set-mode"},
+    {"source": "scripts/start_str2str.py", "target": "/usr/local/sbin/rtk-base-start-str2str"},
+    {"source": "scripts/update.sh", "target": "/usr/local/sbin/rtk-base-update"},
+    {"source": "scripts/download_file.sh", "target": "/usr/local/sbin/rtk-base-download-file"},
+    {"source": "services/str2str.service", "target": "/etc/systemd/system/str2str.service"},
+    {"source": "services/rtk-dashboard.service", "target": "/etc/systemd/system/rtk-dashboard.service"},
+    {"source": "services/rtk-gpsd.service", "target": "/etc/systemd/system/rtk-gpsd.service"},
+    {"source": "services/rtk-base-nginx.conf", "target": "/etc/nginx/sites-available/rtk-base"},
+    {"source": "setup.sh", "target": "/etc/default/rtk-base", "kind": "generated"},
+    {"source": "setup.sh", "target": "/etc/sudoers.d/rtk-base-dashboard", "kind": "generated"},
+]
+
+def render_repo_tree(paths, associations) -> str:
+    tree = {}
+    for path in paths:
+        node = tree
+        parts = path.split("/")
+        for part in parts[:-1]:
+            node = node.setdefault(part, {})
+        node[parts[-1]] = None
+
+    lines = ["."]
+
+    def render_node(node: dict, prefix: str = "", parent: str = "") -> None:
+        entries = sorted(node.items(), key=lambda entry: (entry[1] is None, entry[0].casefold()))
+        for index, (name, child) in enumerate(entries):
+            last = index == len(entries) - 1
+            branch = "└── " if last else "├── "
+            path = f"{parent}/{name}" if parent else name
+            is_dir = isinstance(child, dict)
+            label = name + ("/" if is_dir else "")
+            if not is_dir and path in associations:
+                label += f"  →  {' | '.join(associations[path])}"
+            lines.append(f"{prefix}{branch}{label}")
+            if is_dir:
+                render_node(child, prefix + ("    " if last else "│   "), path)
+
+    render_node(tree)
+    return "\n".join(lines)
+
 HTML = r"""
 <!DOCTYPE html>
 <html lang="en">
@@ -360,7 +418,7 @@ HTML = r"""
   header {
     margin-bottom: 28px;
     position: relative;
-    padding-right: 205px;
+    padding-right: 320px;
   }
   .header-actions {
     position: absolute;
@@ -390,7 +448,7 @@ HTML = r"""
   .reboot-button { color: var(--red); border-color: #713333; }
   .reboot-button:hover { background: #3a1111; border-color: var(--red); }
   #action-message { color: var(--amber); font-size: 11px; text-align: right; }
-  @media (max-width: 600px) {
+  @media (max-width: 720px) {
     header { padding-right: 0; padding-top: 46px; }
     .header-actions { left: 0; right: auto; }
     #action-message { text-align: left; }
@@ -409,7 +467,7 @@ HTML = r"""
   .grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
-    grid-auto-rows: minmax(260px, auto);
+    grid-auto-rows: auto;
     gap: 18px;
   }
   .card {
@@ -419,6 +477,7 @@ HTML = r"""
     padding: 18px;
     display: flex;
     flex-direction: column;
+    min-height: 260px;
   }
   .card h2 {
     color: var(--amber);
@@ -450,6 +509,12 @@ HTML = r"""
   .scroll-stack { display: flex; flex: 1 1 auto; min-height: 180px; flex-direction: column; gap: 12px; }
   .scroll-stack > .scroll-fill { min-height: 70px; }
   .card.collapsed > :not(h2) { display: none; }
+  .card.collapsed {
+    align-self: start;
+    min-height: 0;
+    padding-bottom: 10px;
+  }
+  .card.collapsed h2 { margin-bottom: 0; }
   .card h2[role="button"] { cursor: pointer; user-select: none; }
   .card h2[role="button"]:focus-visible { outline: 1px solid var(--green); outline-offset: 4px; }
   .card.collapsed h2::before { transform: rotate(0deg); }
@@ -569,6 +634,107 @@ HTML = r"""
     .terminal-heading { flex-direction: column; gap: 4px; }
     #update-terminal-status { text-align: left; }
   }
+  .file-dialog-backdrop[hidden] { display: none; }
+  .file-dialog-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 9000;
+    display: grid;
+    place-items: center;
+    padding: 20px;
+    background: rgba(0, 0, 0, 0.82);
+  }
+  .file-dialog {
+    display: flex;
+    flex-direction: column;
+    width: min(720px, 100%);
+    max-height: min(86vh, 900px);
+    background: var(--card);
+    border: 1px solid #28523f;
+    border-radius: 10px;
+    box-shadow: 0 18px 70px #000;
+    padding: 18px;
+  }
+  .file-dialog-heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+  .file-dialog-heading h2 { color: var(--green); font-size: 1rem; letter-spacing: 1px; }
+  .file-dialog-close {
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    background: #111;
+    color: var(--text);
+    font: inherit;
+    font-size: 1.2rem;
+    line-height: 1;
+    padding: 5px 9px;
+    cursor: pointer;
+  }
+  .file-dialog-intro { color: var(--dim); margin: 4px 0 12px; font-size: 11px; }
+  #file-download-list { min-height: 0; overflow: auto; padding-right: 4px; }
+  .file-category { color: var(--amber); font-size: 11px; letter-spacing: 1px; margin: 12px 0 6px; text-transform: uppercase; }
+  .file-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    border-top: 1px solid var(--border);
+    padding: 10px 2px;
+  }
+  .file-item-name { color: var(--text); font-weight: 600; }
+  .file-item-description { color: var(--dim); font-size: 11px; }
+  .file-download-button {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    border: 1px solid #28523f;
+    border-radius: 5px;
+    background: #111;
+    color: var(--green);
+    font: inherit;
+    cursor: pointer;
+    padding: 6px 9px;
+  }
+  .file-download-button:hover { background: #002211; border-color: var(--green); }
+  .file-download-button:disabled { cursor: wait; opacity: 0.55; }
+  .file-download-button img { width: 16px; height: 16px; }
+  #file-dialog-message { color: var(--amber); font-size: 11px; min-height: 1.5em; margin-top: 8px; }
+  @media (max-width: 600px) {
+    .file-dialog-backdrop { padding: 10px; }
+    .file-dialog { max-height: 92vh; padding: 14px; }
+    .file-item { align-items: flex-start; }
+    .file-download-button span { display: none; }
+  }
+  .repo-panel-controls { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+  #repo-file-status { color: var(--dim); font-size: 11px; }
+  .repo-refresh-button {
+    flex: 0 0 auto;
+    border: 1px solid #28523f;
+    border-radius: 5px;
+    background: #111;
+    color: var(--green);
+    font: inherit;
+    font-size: 11px;
+    cursor: pointer;
+    padding: 4px 8px;
+  }
+  .repo-refresh-button:disabled { cursor: wait; opacity: 0.55; }
+  .repo-tree {
+    min-height: 130px;
+    max-height: 360px;
+    overflow: auto;
+    padding: 10px;
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    background: #080c0a;
+    color: #c8e6d5;
+    font-size: 11px;
+    line-height: 1.45;
+    white-space: pre;
+    word-break: normal;
+  }
+  .repo-associations { display: grid; gap: 4px; max-height: 190px; overflow: auto; }
+  .repo-association { color: var(--dim); font-size: 10px; overflow-wrap: anywhere; }
+  .repo-association strong { color: var(--green); font-weight: 400; }
 </style>
 </head>
 <body>
@@ -576,6 +742,10 @@ HTML = r"""
     <h1>RTK-BASE // DIAGNOSTICS</h1>
     <div class="header-actions">
       <div class="header-action-buttons">
+        <button id="files-button" class="dashboard-action update-button" type="button" onclick="openFileDialog()">
+          <img src="{{ url_for('static', filename='files-config.svg') }}" alt="" aria-hidden="true">
+          <span>Files</span>
+        </button>
         <button id="update-button" class="dashboard-action update-button" type="button" onclick="updatePi()">
           <img src="{{ url_for('static', filename='update.svg') }}" alt="" aria-hidden="true">
           <span>Update</span>
@@ -691,6 +861,17 @@ HTML = r"""
       <h2>Serial Devices</h2>
       <pre id="serial" class="scroll-fill"></pre>
     </div>
+
+    <div class="card">
+      <h2>Repository File Tree</h2>
+      <div class="repo-panel-controls">
+        <span id="repo-file-status" role="status">Loading tracked files...</span>
+        <button id="repo-refresh-button" class="repo-refresh-button" type="button" onclick="loadRepoFiles()">Refresh</button>
+      </div>
+      <pre id="repo-tree" class="repo-tree scroll-fill">Loading...</pre>
+      <h3 class="file-category">Installed / Generated Files</h3>
+      <div id="repo-associations" class="repo-associations scroll-fill"></div>
+    </div>
   </div>
 
   <footer>
@@ -705,10 +886,23 @@ HTML = r"""
     <pre id="update-terminal-output" aria-label="Live output from the update and setup scripts"></pre>
   </section>
 
+  <div id="file-dialog-backdrop" class="file-dialog-backdrop" hidden onclick="handleFileDialogBackdrop(event)">
+    <section class="file-dialog" role="dialog" aria-modal="true" aria-labelledby="file-dialog-title">
+      <div class="file-dialog-heading">
+        <h2 id="file-dialog-title">Logs & Configuration</h2>
+        <button class="file-dialog-close" type="button" aria-label="Close file downloads" onclick="closeFileDialog()">×</button>
+      </div>
+      <p class="file-dialog-intro">Choose a file to download from this Pi.</p>
+      <div id="file-download-list" aria-live="polite">Loading available files...</div>
+      <div id="file-dialog-message" role="status" aria-live="polite"></div>
+    </section>
+  </div>
+
 <script>
 let gpsMap = null;
 let gpsMarker = null;
 let mapHasFix = false;
+const DOWNLOAD_ICON_URL = "{{ url_for('static', filename='download.svg') }}";
 let updateOutputOffset = 0;
 let updatePollTimer = null;
 let updateReturnTimer = null;
@@ -974,6 +1168,131 @@ async function updatePi() {
     updateReturnTimer = window.setTimeout(closeUpdateTerminal, 2500);
   }
 }
+async function openFileDialog() {
+  const backdrop = document.getElementById('file-dialog-backdrop');
+  const list = document.getElementById('file-download-list');
+  backdrop.hidden = false;
+  document.body.style.overflow = 'hidden';
+  document.getElementById('file-dialog-message').textContent = '';
+  list.textContent = 'Loading available files...';
+  document.querySelector('.file-dialog-close').focus();
+  try {
+    const response = await fetch('/api/downloads');
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || 'Could not list files');
+    renderDownloadItems(result.files);
+  } catch (error) {
+    list.textContent = error.message;
+  }
+}
+async function loadRepoFiles() {
+  const button = document.getElementById('repo-refresh-button');
+  const status = document.getElementById('repo-file-status');
+  button.disabled = true;
+  status.textContent = 'Reading repository tree...';
+  try {
+    const response = await fetch('/api/repo-files', { cache: 'no-store' });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || 'Could not read repository files');
+    document.getElementById('repo-tree').textContent = result.tree || '(Repository is empty)';
+    const associations = document.getElementById('repo-associations');
+    associations.replaceChildren();
+    result.associations.forEach(item => {
+      const row = document.createElement('div');
+      row.className = 'repo-association';
+      const source = document.createElement('strong');
+      source.textContent = item.source;
+      const state = item.generated ? 'generated' : item.installed ? 'installed' : 'not installed';
+      row.append(source, document.createTextNode(` → ${item.target} (${state})`));
+      associations.appendChild(row);
+    });
+    status.textContent = `${result.file_count} tracked files · ${result.root}`;
+  } catch (error) {
+    document.getElementById('repo-tree').textContent = 'Repository tree is unavailable.';
+    document.getElementById('repo-associations').replaceChildren();
+    status.textContent = error.message;
+  } finally {
+    button.disabled = false;
+  }
+}
+function closeFileDialog() {
+  document.getElementById('file-dialog-backdrop').hidden = true;
+  document.body.style.overflow = '';
+  document.getElementById('files-button').focus();
+}
+function handleFileDialogBackdrop(event) {
+  if (event.target.id === 'file-dialog-backdrop') closeFileDialog();
+}
+function renderDownloadItems(items) {
+  const list = document.getElementById('file-download-list');
+  list.replaceChildren();
+  const categories = new Map();
+  items.forEach(item => {
+    if (!categories.has(item.category)) categories.set(item.category, []);
+    categories.get(item.category).push(item);
+  });
+  categories.forEach((categoryItems, category) => {
+    const heading = document.createElement('h3');
+    heading.className = 'file-category';
+    heading.textContent = category;
+    list.appendChild(heading);
+    categoryItems.forEach(item => {
+      const row = document.createElement('div');
+      row.className = 'file-item';
+      const details = document.createElement('div');
+      const name = document.createElement('div');
+      name.className = 'file-item-name';
+      name.textContent = item.name;
+      const description = document.createElement('div');
+      description.className = 'file-item-description';
+      description.textContent = `${item.description} · ${item.filename}`;
+      details.append(name, description);
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'file-download-button';
+      button.setAttribute('aria-label', `Download ${item.name}`);
+      const icon = document.createElement('img');
+      icon.src = DOWNLOAD_ICON_URL;
+      icon.alt = '';
+      icon.setAttribute('aria-hidden', 'true');
+      const label = document.createElement('span');
+      label.textContent = 'Download';
+      button.append(icon, label);
+      button.addEventListener('click', () => downloadFile(item, button));
+      row.append(details, button);
+      list.appendChild(row);
+    });
+  });
+}
+async function downloadFile(item, button) {
+  const message = document.getElementById('file-dialog-message');
+  message.textContent = `Preparing ${item.filename}...`;
+  button.disabled = true;
+  try {
+    const response = await fetch(`/api/downloads/${encodeURIComponent(item.id)}`);
+    if (!response.ok) {
+      const result = await response.json();
+      throw new Error(result.error || `Could not download ${item.filename}`);
+    }
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = item.filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    message.textContent = `Downloaded ${item.filename}.`;
+  } catch (error) {
+    message.textContent = error.message;
+  } finally {
+    button.disabled = false;
+  }
+}
+document.addEventListener('keydown', event => {
+  if (event.key === 'Escape' && !document.getElementById('file-dialog-backdrop').hidden) closeFileDialog();
+});
 function closeUpdateTerminal() {
   document.getElementById('update-terminal-screen').classList.remove('active');
   document.getElementById('update-button').disabled = false;
@@ -1006,6 +1325,7 @@ async function pollUpdateOutput() {
 }
 setupCollapsiblePanels();
 refresh();
+loadRepoFiles();
 setInterval(refresh, 4000);
 </script>
 </body>
@@ -1153,6 +1473,70 @@ def api_update_output():
         "status": status,
         "done": done,
         "success": success,
+    })
+
+@app.route("/api/downloads")
+def api_downloads():
+    return jsonify({"files": DOWNLOAD_ITEMS})
+
+@app.route("/api/downloads/<file_id>")
+def api_download_file(file_id: str):
+    item = next((entry for entry in DOWNLOAD_ITEMS if entry["id"] == file_id), None)
+    if item is None:
+        return jsonify({"error": "Unknown download item"}), 404
+    try:
+        result = subprocess.run(
+            ["sudo", "-n", "/usr/local/sbin/rtk-base-download-file", file_id],
+            capture_output=True, timeout=20, check=False
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return jsonify({"error": "Could not read the selected file"}), 500
+    if result.returncode != 0:
+        error = result.stderr.decode("utf-8", errors="replace").strip()
+        return jsonify({"error": error or "The selected file is not available"}), 404
+    response = Response(
+        result.stdout,
+        mimetype="text/plain",
+        headers={"Content-Disposition": f'attachment; filename="{item["filename"]}"'},
+    )
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+@app.route("/api/repo-files")
+def api_repo_files():
+    try:
+        repo_path = Path("/etc/rtk-base-update-repo").read_text(encoding="utf-8").strip()
+    except OSError:
+        return jsonify({"error": "Repository path is not configured; run setup first"}), 503
+    repo = Path(repo_path)
+    if not repo.is_dir() or not (repo / ".git").exists():
+        return jsonify({"error": "Configured RTK-Base repository is unavailable"}), 503
+    try:
+        result = subprocess.run(
+            ["git", "-c", f"safe.directory={repo}", "-C", str(repo), "ls-files", "--cached", "--others", "--exclude-standard", "-z"],
+            capture_output=True, timeout=5, check=False
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return jsonify({"error": "Could not list tracked repository files"}), 500
+    if result.returncode != 0:
+        return jsonify({"error": "Could not list tracked repository files"}), 500
+
+    paths = [path for path in result.stdout.decode("utf-8", errors="replace").split("\0") if path]
+    association_map = {}
+    associations = []
+    for entry in REPO_ASSOCIATIONS:
+        association_map.setdefault(entry["source"], []).append(entry["target"])
+        associations.append({
+            **entry,
+            "generated": entry.get("kind") == "generated",
+            "installed": Path(entry["target"]).exists(),
+        })
+    return jsonify({
+        "root": repo.name,
+        "file_count": len(paths),
+        "tree": render_repo_tree(paths, association_map),
+        "associations": associations,
     })
 
 if __name__ == "__main__":

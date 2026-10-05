@@ -14,9 +14,11 @@ Planner.
 - Collapsible dashboard panels
 - Dashboard available on the standard HTTP port
 - Dashboard update control with a live terminal view for the updater and setup output
+- Dashboard downloads for RTK-Base logs and installed configuration files
+- Repository file tree with mappings to installed updater and service files
 - Satellite sky view, signal strengths, and receiver position map in telemetry mode
 
-Dashboard version: **0.3.1** (`dashboard/VERSION`)
+Dashboard version: **0.4.0** (`dashboard/VERSION`)
 
 ## Hardware
 
