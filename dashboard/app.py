@@ -54,6 +54,15 @@ def get_rtcm_client_count() -> int:
 def get_service_restarts() -> str:
     return run("systemctl show str2str.service -p NRestarts --value") or "0"
 
+def get_stream_uptime() -> str:
+    if run("systemctl is-active str2str.service 2>/dev/null") != "active":
+        return "Not running"
+    try:
+        started = int(run("systemctl show str2str.service -p ActiveEnterTimestampMonotonic --value")) / 1_000_000
+        return str(timedelta(seconds=max(0, int(time.monotonic() - started))))
+    except (TypeError, ValueError, OSError):
+        return "Unavailable"
+
 def get_usb() -> str:
     return run("lsusb") or "No USB devices found"
 
@@ -777,14 +786,12 @@ HTML = r"""
   <div class="grid">
     <div class="card">
       <h2>System</h2>
+      <div class="metric"><span>Dashboard version</span><span id="version">—</span></div>
       <div class="metric"><span>Hostname</span><span id="hostname">–</span></div>
       <div class="metric"><span>Uptime</span><span id="uptime">–</span></div>
       <div class="metric"><span>Temperature</span><span id="temp">–</span></div>
       <div class="metric"><span>Primary IP</span><span id="ip">–</span></div>
-      <div class="metric"><span>RTCM output</span><span id="rtcm-port">TCP :2101</span></div>
-      <div class="metric"><span>RTCM clients</span><span id="rtcm-clients">—</span></div>
       <div class="metric"><span>Dashboard</span><span>HTTP :80</span></div>
-      <div class="metric"><span>Stream restarts</span><span id="str-restarts">—</span></div>
     </div>
 
     <div class="card">
@@ -799,8 +806,13 @@ HTML = r"""
     </div>
 
     <div class="card">
-      <h2>str2str Service</h2>
-      <div class="metric"><span>Status</span><span id="str-status" class="status">–</span></div>
+      <h2>RTK Stream Health</h2>
+      <div class="metric"><span>Service</span><span id="str-status" class="status">–</span></div>
+      <div class="metric"><span>RTCM output</span><span id="rtcm-port">TCP :2101</span></div>
+      <div class="metric"><span>Connected clients</span><span id="rtcm-clients">—</span></div>
+      <div class="metric"><span>Running for</span><span id="stream-uptime">—</span></div>
+      <div class="metric"><span>Service restarts</span><span id="str-restarts">—</span></div>
+      <div class="map-note">Client count is based on established TCP connections to the RTCM output port.</div>
       <pre id="str-log" class="scroll-fill" style="margin-top:12px; color:#aaa;"></pre>
     </div>
 
@@ -1092,6 +1104,7 @@ async function refresh() {
     const d = await r.json();
 
     document.getElementById('clock').textContent = d.time;
+    document.getElementById('version').textContent = d.version;
     document.getElementById('hostname').textContent = d.hostname;
     document.getElementById('uptime').textContent = d.uptime;
     document.getElementById('temp').textContent = d.temp;
@@ -1107,6 +1120,7 @@ async function refresh() {
     document.getElementById('rtcm-port').textContent = `TCP :${d.rtcm_port}`;
     document.getElementById('rtcm-clients').textContent = d.rtcm_clients;
     document.getElementById('str-restarts').textContent = d.str_restarts;
+    document.getElementById('stream-uptime').textContent = d.stream_uptime;
     document.getElementById('wifi-interface').textContent = d.wifi.interface;
     document.getElementById('wifi-ssid').textContent = d.wifi.ssid;
     document.getElementById('wifi-signal').textContent = d.wifi.signal;
@@ -1413,6 +1427,7 @@ def api_data():
         "rtcm_port": get_rtcm_port(),
         "rtcm_clients": get_rtcm_client_count(),
         "str_restarts": get_service_restarts(),
+        "stream_uptime": get_stream_uptime(),
         "wifi": get_wifi_data(),
         "network_traffic": get_network_traffic(),
         "str_status": str_status,
