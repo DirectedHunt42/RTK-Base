@@ -550,8 +550,12 @@ HTML = r"""
     border-radius: 4px;
     transition: width 0.6s ease;
   }
-  .wifi-bar { margin: 4px 0 10px; }
-  .wifi-bar .bar-fill { background: linear-gradient(90deg, #ff5555, #ffb000, #00ff9f); }
+  .wifi-signal-display { display: flex; align-items: center; gap: 10px; margin: 10px 0; }
+  .wifi-icon { width: 34px; height: 28px; overflow: visible; }
+  .wifi-icon path, .wifi-icon circle { fill: none; stroke: #555; stroke-width: 3; stroke-linecap: round; }
+  .wifi-icon .active { stroke: var(--green); }
+  .wifi-icon circle { fill: #555; stroke: none; }
+  .wifi-icon circle.active { fill: var(--green); }
   .mode-controls { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
   .mode-controls button {
     background: #111;
@@ -583,10 +587,20 @@ HTML = r"""
   .sky-sat.used { fill: var(--green); }
   .sky-label { fill: var(--text); font: 8px 'JetBrains Mono', monospace; text-anchor: middle; }
   .signal-list { display: grid; align-content: start; gap: 6px; flex: 1 1 auto; min-height: 220px; overflow: auto; }
-  .signal-row { display: grid; grid-template-columns: 52px 1fr 40px; gap: 8px; align-items: center; font-size: 11px; }
+  .signal-row { display: grid; grid-template-columns: 68px 1fr 52px; gap: 8px; align-items: center; font-size: 11px; }
   .signal-track { height: 7px; background: #1a1a1a; border-radius: 5px; overflow: hidden; }
   .signal-fill { height: 100%; background: #777; border-radius: inherit; }
   .signal-fill.used { background: var(--green); }
+  .sat-cell { display: flex; align-items: end; gap: 2px; height: 18px; }
+  .sat-cell i { display: block; width: 4px; background: #303030; border-radius: 1px 1px 0 0; }
+  .sat-cell i:nth-child(1) { height: 5px; }
+  .sat-cell i:nth-child(2) { height: 9px; }
+  .sat-cell i:nth-child(3) { height: 13px; }
+  .sat-cell i:nth-child(4) { height: 17px; }
+  .sat-cell i.on { background: var(--green); }
+  .constellation-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(105px, 1fr)); gap: 8px; margin: 8px 0 14px; }
+  .constellation-chip { border: 1px solid var(--border); border-radius: 5px; padding: 7px; color: var(--dim); font-size: 11px; }
+  .constellation-chip strong { display: block; color: var(--green); font-size: 15px; margin-top: 3px; }
   @media (max-width: 600px) { .satellite-graphics { grid-template-columns: 1fr; } }
   footer {
     margin-top: 40px;
@@ -782,14 +796,6 @@ HTML = r"""
       <div class="metric"><span>Disk</span><span id="disk">–</span></div>
       <div class="bar"><div class="bar-fill" id="disk-bar" style="width:0%"></div></div>
       <div class="metric"><span>Load (1 / 5 / 15)</span><span id="load">–</span></div>
-      <div class="metric"><span>Wi-Fi interface</span><span id="wifi-interface">—</span></div>
-      <div class="metric"><span>Network</span><span id="wifi-ssid">—</span></div>
-      <div class="metric"><span>Signal</span><span id="wifi-signal">—</span></div>
-      <div class="bar wifi-bar"><div class="bar-fill" id="wifi-bar" style="width:0%"></div></div>
-      <div class="metric"><span>Wi-Fi link</span><span id="wifi-link">—</span></div>
-      <div class="metric"><span>Frequency</span><span id="wifi-frequency">—</span></div>
-      <div class="metric"><span>TX rate</span><span id="wifi-bitrate">—</span></div>
-      <div class="metric"><span>RX / TX since boot</span><span id="net-traffic">—</span></div>
     </div>
 
     <div class="card">
@@ -826,6 +832,12 @@ HTML = r"""
     </div>
 
     <div class="card">
+      <h2>GNSS Constellations</h2>
+      <div id="constellation-list" class="constellation-list"><span class="map-note">Waiting for satellite data…</span></div>
+      <div class="map-note">Visible satellites and satellites used in the fix, grouped by constellation.</div>
+    </div>
+
+    <div class="card">
       <h2>Satellite View & Signal</h2>
       <div class="satellite-graphics">
         <svg id="satellite-sky" viewBox="0 0 240 240" role="img" aria-label="Satellite sky plot">
@@ -845,7 +857,14 @@ HTML = r"""
     </div>
 
     <div class="card">
-      <h2>Network & Ports</h2>
+      <h2>Network</h2>
+      <div class="metric"><span>Wi-Fi interface</span><span id="wifi-interface">—</span></div>
+      <div class="metric"><span>Network</span><span id="wifi-ssid">—</span></div>
+      <div class="wifi-signal-display"><svg class="wifi-icon" viewBox="0 0 36 30" role="img" aria-label="Wi-Fi signal strength"><path class="wifi-segment" d="M2 9 Q18 -3 34 9"/><path class="wifi-segment" d="M7 15 Q18 7 29 15"/><path class="wifi-segment" d="M12 21 Q18 16 24 21"/><circle class="wifi-segment" cx="18" cy="27" r="1.8"/></svg><span id="wifi-signal">—</span></div>
+      <div class="metric"><span>Wi-Fi link</span><span id="wifi-link">—</span></div>
+      <div class="metric"><span>Frequency</span><span id="wifi-frequency">—</span></div>
+      <div class="metric"><span>TX rate</span><span id="wifi-bitrate">—</span></div>
+      <div class="metric"><span>RX / TX since boot</span><span id="net-traffic">—</span></div>
       <div class="scroll-stack">
         <pre id="network" class="scroll-fill"></pre>
         <pre id="ports" class="scroll-fill" style="color:#aaa;"></pre>
@@ -991,12 +1010,32 @@ function updateSatelliteGraphics(satellites) {
   const svgNamespace = 'http://www.w3.org/2000/svg';
   const plot = document.getElementById('sky-satellites');
   const list = document.getElementById('signal-list');
+  const constellationList = document.getElementById('constellation-list');
   while (plot.firstChild) plot.removeChild(plot.firstChild);
   list.replaceChildren();
+  constellationList.replaceChildren();
   if (!satellites || satellites.length === 0) {
     list.textContent = 'No satellite data available';
+    constellationList.textContent = 'No constellation data available';
     return;
   }
+  const constellations = new Map();
+  satellites.forEach(sat => {
+    const name = String(sat.id || 'Unknown').replace(/\s+\S+$/, '');
+    const entry = constellations.get(name) || { visible: 0, used: 0 };
+    entry.visible += 1;
+    if (sat.used) entry.used += 1;
+    constellations.set(name, entry);
+  });
+  [...constellations.entries()].sort((a, b) => a[0].localeCompare(b[0])).forEach(([name, counts]) => {
+    const chip = document.createElement('div');
+    chip.className = 'constellation-chip';
+    chip.textContent = `${name} · ${counts.visible} visible`;
+    const used = document.createElement('strong');
+    used.textContent = `${counts.used} used`;
+    chip.appendChild(used);
+    constellationList.appendChild(chip);
+  });
   satellites.forEach(satellite => {
     const az = Number(satellite.azimuth);
     const el = Number(satellite.elevation);
@@ -1032,15 +1071,17 @@ function updateSatelliteGraphics(satellites) {
     row.className = 'signal-row';
     const label = document.createElement('span');
     label.textContent = `${satellite.used ? 'USED ' : ''}${satellite.id}`;
-    const track = document.createElement('div');
-    track.className = 'signal-track';
-    const fill = document.createElement('div');
-    fill.className = satellite.used ? 'signal-fill used' : 'signal-fill';
-    fill.style.width = `${hasSignal ? Math.max(0, Math.min(100, signal / 60 * 100)) : 0}%`;
-    track.appendChild(fill);
+    const bars = document.createElement('div');
+    bars.className = 'sat-cell';
+    const strength = hasSignal ? Math.max(0, Math.min(4, Math.ceil(signal / 60 * 4))) : 0;
+    for (let index = 1; index <= 4; index += 1) {
+      const bar = document.createElement('i');
+      if (index <= strength) bar.className = 'on';
+      bars.appendChild(bar);
+    }
     const value = document.createElement('span');
     value.textContent = hasSignal ? `${signal.toFixed(0)} dB-Hz` : '—';
-    row.append(label, track, value);
+    row.append(label, bars, value);
     list.appendChild(row);
   });
 }
@@ -1069,7 +1110,10 @@ async function refresh() {
     document.getElementById('wifi-interface').textContent = d.wifi.interface;
     document.getElementById('wifi-ssid').textContent = d.wifi.ssid;
     document.getElementById('wifi-signal').textContent = d.wifi.signal;
-    document.getElementById('wifi-bar').style.width = `${d.wifi.quality}%`;
+    const wifiStrength = Number(d.wifi.quality) || 0;
+    document.querySelectorAll('.wifi-segment').forEach((segment, index) => {
+      segment.classList.toggle('active', wifiStrength > (3 - index) * 25);
+    });
     document.getElementById('wifi-link').textContent = d.wifi.link;
     document.getElementById('wifi-frequency').textContent = d.wifi.frequency || '—';
     document.getElementById('wifi-bitrate').textContent = d.wifi.bitrate || '—';
