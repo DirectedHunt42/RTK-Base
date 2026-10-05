@@ -475,7 +475,7 @@ HTML = r"""
   }
   .grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 360px), 1fr));
     grid-auto-rows: auto;
     gap: 18px;
   }
@@ -486,7 +486,8 @@ HTML = r"""
     padding: 18px;
     display: flex;
     flex-direction: column;
-    min-height: 260px;
+    aspect-ratio: 1;
+    overflow: auto;
   }
   .card h2 {
     color: var(--amber);
@@ -520,6 +521,7 @@ HTML = r"""
   .card.collapsed > :not(h2) { display: none; }
   .card.collapsed {
     align-self: start;
+    aspect-ratio: auto;
     min-height: 0;
     padding-bottom: 10px;
   }
