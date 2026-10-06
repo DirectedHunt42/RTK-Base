@@ -587,9 +587,14 @@ HTML = r"""
   #flow-card { min-height: 0; overflow-y: auto; }
   .wifi-icon { width: 34px; height: 28px; overflow: visible; }
   .wifi-icon path, .wifi-icon circle { fill: none; stroke: #555; stroke-width: 3; stroke-linecap: round; }
-  .wifi-icon .active { stroke: var(--green); }
+  .wifi-icon .active { stroke: var(--signal-color, #555); }
   .wifi-icon circle { fill: #555; stroke: none; }
-  .wifi-icon circle.active { fill: var(--green); }
+  .wifi-icon circle.active { fill: var(--signal-color, #555); }
+  .signal-weak { --signal-color: #ff5b5b; color: #ff5b5b !important; }
+  .signal-fair { --signal-color: #ffb547; color: #ffb547 !important; }
+  .signal-good { --signal-color: #d6e64a; color: #d6e64a !important; }
+  .signal-strong { --signal-color: #00e889; color: #00e889 !important; }
+  .signal-none { --signal-color: #777; color: var(--dim) !important; }
   .mode-controls { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
   .mode-controls button {
     background: #111;
@@ -612,30 +617,39 @@ HTML = r"""
     z-index: 0;
   }
   .map-note { color: var(--dim); font-size: 11px; margin-top: 8px; }
-  .satellite-graphics { display: grid; flex: 1 1 auto; min-height: 240px; grid-template-columns: minmax(190px, 240px) 1fr; gap: 18px; align-items: center; }
-  #satellite-sky { width: 100%; max-width: 240px; height: auto; }
+  .satellite-graphics { display: flex; justify-content: center; align-items: center; min-height: 0; padding: 4px 0; }
+  #satellite-sky { display: block; width: min(100%, 360px); height: auto; }
   .sky-ring { fill: none; stroke: #28523f; stroke-width: 1; }
   .sky-cross { stroke: #1e3b2d; stroke-width: 1; }
   .sky-cardinal { fill: var(--dim); font: 10px 'JetBrains Mono', monospace; text-anchor: middle; }
-  .sky-sat { fill: #666; stroke: #0a0a0a; stroke-width: 1.5; }
-  .sky-sat.used { fill: var(--green); }
+  .sky-sat { fill: #242a27; stroke: #d3ddd7; stroke-width: 1.5; }
+  .sky-sat.used { stroke: var(--green); stroke-width: 2.5; }
   .sky-label { fill: var(--text); font: 8px 'JetBrains Mono', monospace; text-anchor: middle; }
-  .signal-list { display: grid; align-content: start; gap: 6px; flex: 1 1 auto; min-height: 220px; overflow: auto; }
-  .signal-row { display: grid; grid-template-columns: 68px 1fr 52px; gap: 8px; align-items: center; font-size: 11px; }
-  .signal-track { height: 7px; background: #1a1a1a; border-radius: 5px; overflow: hidden; }
-  .signal-fill { height: 100%; background: #777; border-radius: inherit; }
-  .signal-fill.used { background: var(--green); }
+  .sky-legend { display: flex; flex-wrap: wrap; justify-content: center; gap: 7px 13px; margin: 8px 0 2px; color: var(--dim); font-size: 11px; }
+  .sky-legend-item { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+  .sky-legend svg { width: 13px; height: 13px; overflow: visible; }
+  .sky-legend-shape { fill: #242a27; stroke: #d3ddd7; stroke-width: 1.5; }
+  .sky-used-key { display: inline-block; width: 9px; height: 9px; border: 2px solid var(--green); border-radius: 50%; }
+  .satellite-details { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: 12px; max-height: 330px; overflow: auto; padding: 2px 2px 8px; }
+  .satellite-group { min-width: 0; border: 1px solid var(--border); border-radius: 5px; padding: 8px; }
+  .satellite-group h3 { margin: 0 0 8px; color: var(--green); font-size: 12px; }
+  .signal-list { display: grid; align-content: start; gap: 7px; }
+  .signal-row { display: grid; grid-template-columns: minmax(62px, 1fr) auto 60px; gap: 8px; align-items: center; font-size: 11px; min-width: 0; }
+  .signal-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .sat-cell { display: flex; align-items: end; gap: 2px; height: 18px; }
-  .sat-cell i { display: block; width: 4px; background: #303030; border-radius: 1px 1px 0 0; }
+  .sat-cell i { display: block; width: 5px; background: #303030; border-radius: 1px 1px 0 0; }
   .sat-cell i:nth-child(1) { height: 5px; }
   .sat-cell i:nth-child(2) { height: 9px; }
   .sat-cell i:nth-child(3) { height: 13px; }
   .sat-cell i:nth-child(4) { height: 17px; }
-  .sat-cell i.on { background: var(--green); }
+  .sat-cell.signal-weak i.on { background: var(--signal-color); }
+  .sat-cell.signal-fair i.on { background: var(--signal-color); }
+  .sat-cell.signal-good i.on { background: var(--signal-color); }
+  .sat-cell.signal-strong i.on { background: var(--signal-color); }
   .constellation-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(105px, 1fr)); gap: 8px; margin: 8px 0 14px; }
   .constellation-chip { border: 1px solid var(--border); border-radius: 5px; padding: 7px; color: var(--dim); font-size: 11px; }
   .constellation-chip strong { display: block; color: var(--green); font-size: 15px; margin-top: 3px; }
-  @media (max-width: 600px) { .satellite-graphics { grid-template-columns: 1fr; } }
+  @media (max-width: 600px) { .satellite-details { max-height: 260px; } .signal-row { grid-template-columns: minmax(54px, 1fr) auto 54px; gap: 5px; } }
   footer {
     margin-top: 40px;
     text-align: center;
@@ -897,11 +911,12 @@ HTML = r"""
     <div class="card">
       <h2>GNSS Constellations</h2>
       <div id="constellation-list" class="constellation-list"><span class="map-note">Waiting for satellite data…</span></div>
-      <div class="map-note">Visible satellites and satellites used in the fix, grouped by constellation.</div>
+      <div id="signal-list" class="satellite-details"><span class="map-note">Waiting for satellite data…</span></div>
+      <div class="map-note">Each group shows visible satellites, fix usage, and received signal strength (dB-Hz).</div>
     </div>
 
     <div class="card">
-      <h2>Satellite View & Signal</h2>
+      <h2>Satellite Sky Map</h2>
       <div class="satellite-graphics">
         <svg id="satellite-sky" viewBox="0 0 240 240" role="img" aria-label="Satellite sky plot">
           <circle class="sky-ring" cx="120" cy="120" r="100" />
@@ -914,9 +929,9 @@ HTML = r"""
           <text class="sky-cardinal" x="12" y="123">W</text>
           <g id="sky-satellites"></g>
         </svg>
-        <div id="signal-list" class="signal-list"><span class="map-note">Waiting for satellite data…</span></div>
       </div>
-      <div class="map-note">Green satellites are being used in the fix. Sky plot shows azimuth and elevation.</div>
+      <div id="sky-legend" class="sky-legend" aria-label="Sky map legend"></div>
+      <div class="map-note">Satellite shape identifies its constellation. A green outline marks satellites used in the fix.</div>
     </div>
 
     <div class="card">
@@ -1140,20 +1155,51 @@ function updateSatelliteGraphics(satellites) {
   const plot = document.getElementById('sky-satellites');
   const list = document.getElementById('signal-list');
   const constellationList = document.getElementById('constellation-list');
+  const skyLegend = document.getElementById('sky-legend');
+  const shapeKinds = { GPS: 'circle', SBAS: 'square', Galileo: 'triangle', BeiDou: 'diamond', IMES: 'pentagon', QZSS: 'hexagon', GLONASS: 'cross', NavIC: 'star' };
+  const constellationOf = satellite => String(satellite.id || 'Unknown').replace(/\s+\S+$/, '');
+  const signalClass = signal => signal < 20 ? 'signal-weak' : signal < 30 ? 'signal-fair' : signal < 40 ? 'signal-good' : 'signal-strong';
+  const appendShape = (svg, name, className, radius = 5) => {
+    const kind = shapeKinds[name] || 'circle';
+    let shape;
+    if (kind === 'circle') {
+      shape = document.createElementNS(svgNamespace, 'circle');
+      shape.setAttribute('r', radius);
+    } else if (kind === 'square') {
+      shape = document.createElementNS(svgNamespace, 'rect');
+      shape.setAttribute('x', -radius); shape.setAttribute('y', -radius);
+      shape.setAttribute('width', radius * 2); shape.setAttribute('height', radius * 2);
+    } else {
+      const sides = { triangle: 3, diamond: 4, pentagon: 5, hexagon: 6, cross: 8, star: 10 }[kind] || 3;
+      const points = Array.from({ length: sides }, (_, index) => {
+        const angle = -Math.PI / 2 + index * Math.PI * 2 / sides;
+        const pointRadius = kind === 'star' && index % 2 ? radius * 0.45 : radius;
+        return `${(Math.cos(angle) * pointRadius).toFixed(1)},${(Math.sin(angle) * pointRadius).toFixed(1)}`;
+      }).join(' ');
+      shape = document.createElementNS(svgNamespace, 'polygon');
+      shape.setAttribute('points', points);
+    }
+    shape.setAttribute('class', className);
+    svg.appendChild(shape);
+    return shape;
+  };
   while (plot.firstChild) plot.removeChild(plot.firstChild);
   list.replaceChildren();
   constellationList.replaceChildren();
+  skyLegend.replaceChildren();
   if (!satellites || satellites.length === 0) {
     list.textContent = 'No satellite data available';
     constellationList.textContent = 'No constellation data available';
+    skyLegend.textContent = 'No constellation data';
     return;
   }
   const constellations = new Map();
   satellites.forEach(sat => {
-    const name = String(sat.id || 'Unknown').replace(/\s+\S+$/, '');
-    const entry = constellations.get(name) || { visible: 0, used: 0 };
+    const name = constellationOf(sat);
+    const entry = constellations.get(name) || { visible: 0, used: 0, satellites: [] };
     entry.visible += 1;
     if (sat.used) entry.used += 1;
+    entry.satellites.push(sat);
     constellations.set(name, entry);
   });
   [...constellations.entries()].sort((a, b) => a[0].localeCompare(b[0])).forEach(([name, counts]) => {
@@ -1164,7 +1210,51 @@ function updateSatelliteGraphics(satellites) {
     used.textContent = `${counts.used} used`;
     chip.appendChild(used);
     constellationList.appendChild(chip);
+
+    const group = document.createElement('section');
+    group.className = 'satellite-group';
+    const heading = document.createElement('h3');
+    heading.textContent = name;
+    group.appendChild(heading);
+    const rows = document.createElement('div');
+    rows.className = 'signal-list';
+    counts.satellites.sort((a, b) => String(a.id).localeCompare(String(b.id), undefined, { numeric: true })).forEach(satellite => {
+      const signal = Number(satellite.signal);
+      const hasSignal = satellite.signal !== null && Number.isFinite(signal);
+      const row = document.createElement('div');
+      row.className = 'signal-row';
+      const label = document.createElement('span');
+      label.className = 'signal-name';
+      label.textContent = `${satellite.used ? 'USED ' : ''}${satellite.id}`;
+      const bars = document.createElement('div');
+      const strength = hasSignal ? Math.max(0, Math.min(4, Math.ceil(signal / 10))) : 0;
+      bars.className = `sat-cell ${hasSignal ? signalClass(signal) : ''}`;
+      for (let index = 1; index <= 4; index += 1) {
+        const bar = document.createElement('i');
+        if (index <= strength) bar.className = 'on';
+        bars.appendChild(bar);
+      }
+      const value = document.createElement('span');
+      value.className = hasSignal ? signalClass(signal) : '';
+      value.textContent = hasSignal ? `${signal.toFixed(0)} dB-Hz` : '—';
+      row.append(label, bars, value);
+      rows.appendChild(row);
+    });
+    group.appendChild(rows);
+    list.appendChild(group);
+
+    const legendItem = document.createElement('span');
+    legendItem.className = 'sky-legend-item';
+    const legendShape = document.createElementNS(svgNamespace, 'svg');
+    legendShape.setAttribute('viewBox', '-8 -8 16 16');
+    appendShape(legendShape, name, 'sky-legend-shape', 5);
+    legendItem.append(legendShape, document.createTextNode(name));
+    skyLegend.appendChild(legendItem);
   });
+  const usedKey = document.createElement('span');
+  usedKey.className = 'sky-legend-item';
+  usedKey.innerHTML = '<i class="sky-used-key"></i>Used in fix';
+  skyLegend.appendChild(usedKey);
   satellites.forEach(satellite => {
     const az = Number(satellite.azimuth);
     const el = Number(satellite.elevation);
@@ -1176,11 +1266,8 @@ function updateSatelliteGraphics(satellites) {
       const x = 120 + radius * Math.sin(angle);
       const y = 120 - radius * Math.cos(angle);
       const group = document.createElementNS(svgNamespace, 'g');
-      const dot = document.createElementNS(svgNamespace, 'circle');
-      dot.setAttribute('cx', x.toFixed(1));
-      dot.setAttribute('cy', y.toFixed(1));
-      dot.setAttribute('r', '5');
-      dot.setAttribute('class', satellite.used ? 'sky-sat used' : 'sky-sat');
+      const dot = appendShape(group, constellationOf(satellite), satellite.used ? 'sky-sat used' : 'sky-sat', 5);
+      dot.setAttribute('transform', `translate(${x.toFixed(1)} ${y.toFixed(1)})`);
       const title = document.createElementNS(svgNamespace, 'title');
       title.textContent = `${satellite.id}: az ${az} deg, el ${el} deg${satellite.used ? ', used' : ''}`;
       dot.appendChild(title);
@@ -1193,25 +1280,6 @@ function updateSatelliteGraphics(satellites) {
       group.appendChild(label);
       plot.appendChild(group);
     }
-
-    const signal = Number(satellite.signal);
-    const hasSignal = satellite.signal !== null && Number.isFinite(signal);
-    const row = document.createElement('div');
-    row.className = 'signal-row';
-    const label = document.createElement('span');
-    label.textContent = `${satellite.used ? 'USED ' : ''}${satellite.id}`;
-    const bars = document.createElement('div');
-    bars.className = 'sat-cell';
-    const strength = hasSignal ? Math.max(0, Math.min(4, Math.ceil(signal / 60 * 4))) : 0;
-    for (let index = 1; index <= 4; index += 1) {
-      const bar = document.createElement('i');
-      if (index <= strength) bar.className = 'on';
-      bars.appendChild(bar);
-    }
-    const value = document.createElement('span');
-    value.textContent = hasSignal ? `${signal.toFixed(0)} dB-Hz` : '—';
-    row.append(label, bars, value);
-    list.appendChild(row);
   });
 }
 
@@ -1241,10 +1309,12 @@ async function refresh() {
     document.getElementById('stream-uptime').textContent = d.stream_uptime;
     document.getElementById('wifi-interface').textContent = d.wifi.interface;
     document.getElementById('wifi-ssid').textContent = d.wifi.ssid;
-    document.getElementById('wifi-signal').textContent = d.wifi.signal;
     const wifiStrength = Number(d.wifi.quality) || 0;
+    const wifiSignal = document.getElementById('wifi-signal');
+    wifiSignal.textContent = d.wifi.signal;
+    wifiSignal.className = d.wifi.signal === '—' ? 'signal-none' : wifiStrength < 35 ? 'signal-weak' : wifiStrength < 65 ? 'signal-fair' : wifiStrength < 85 ? 'signal-good' : 'signal-strong';
     document.querySelectorAll('.wifi-segment').forEach((segment, index) => {
-      segment.classList.toggle('active', wifiStrength > (3 - index) * 25);
+      segment.classList.toggle('active', wifiStrength >= (index + 1) * 25);
     });
     document.getElementById('wifi-link').textContent = d.wifi.link;
     document.getElementById('wifi-frequency').textContent = d.wifi.frequency || '—';
