@@ -508,6 +508,22 @@ HTML = r"""
     aspect-ratio: 1;
     overflow: auto;
   }
+  #orbit-card {
+    grid-column: 1 / -1;
+    min-height: clamp(520px, 72vh, 760px);
+    aspect-ratio: auto;
+    overflow: hidden;
+    background: radial-gradient(ellipse at 50% 48%, #101c16 0%, var(--card) 72%);
+  }
+  .orbit-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  .orbit-heading h2 { margin-bottom: 8px; }
+  #orbit-summary { color: var(--dim); font-size: 11px; }
+  #orbit-view { display: block; width: 100%; flex: 1 1 auto; min-height: 390px; }
+  .orbit-foot { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; color: var(--dim); font-size: 11px; margin-top: 8px; }
+  .orbit-key { display: flex; flex-wrap: wrap; gap: 12px; }
+  .orbit-key span { white-space: nowrap; }
+  .orbit-key i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; }
+  @media (max-width: 600px) { #orbit-card { min-height: 460px; } #orbit-view { min-height: 320px; } }
   .card h2 {
     color: var(--amber);
     font-size: 0.9rem;
@@ -970,6 +986,18 @@ HTML = r"""
       <h3 class="file-category">Installed / Generated Files</h3>
       <div id="repo-associations" class="repo-associations scroll-fill"></div>
     </div>
+
+    <section id="orbit-card" class="card">
+      <div class="orbit-heading">
+        <h2>GNSS Orbital View</h2>
+        <span id="orbit-summary">Waiting for receiver position and satellite sky view</span>
+      </div>
+      <canvas id="orbit-view" role="img" aria-label="Three dimensional globe showing approximate positions of tracked GNSS satellites"></canvas>
+      <div class="orbit-foot">
+        <div id="orbit-key" class="orbit-key"></div>
+        <span>Positions use GPSD azimuth/elevation and nominal constellation altitude; orbit tracks are illustrative.</span>
+      </div>
+    </section>
   </div>
 
   <footer>
@@ -1001,6 +1029,8 @@ HTML = r"""
 let gpsMap = null;
 let gpsMarker = null;
 let mapHasFix = false;
+let orbitGps = { latitude: null, longitude: null };
+let orbitSatellites = [];
 const DOWNLOAD_ICON_URL = "{{ url_for('static', filename='download.svg') }}";
 let updateOutputOffset = 0;
 let updatePollTimer = null;
@@ -1287,6 +1317,131 @@ function updateSatelliteGraphics(satellites) {
   });
 }
 
+function drawOrbitView(gps = orbitGps, satellites = orbitSatellites) {
+  const canvas = document.getElementById('orbit-view');
+  const ctx = canvas.getContext('2d');
+  const bounds = canvas.getBoundingClientRect();
+  if (!bounds.width || !bounds.height) return;
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const width = Math.round(bounds.width * dpr), height = Math.round(bounds.height * dpr);
+  if (canvas.width !== width || canvas.height !== height) { canvas.width = width; canvas.height = height; }
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const w = bounds.width, h = bounds.height;
+  ctx.clearRect(0, 0, w, h);
+  const cx = w / 2, cy = h / 2 + 3;
+  const earthR = Math.max(82, Math.min(h * .31, w * .16, 175));
+  const lat = Number(gps.latitude), lon = Number(gps.longitude);
+  const hasFix = Number.isFinite(lat) && Number.isFinite(lon);
+  const latR = (hasFix ? lat : 0) * Math.PI / 180;
+  const lonR = (hasFix ? lon : 0) * Math.PI / 180;
+  const forward = [Math.cos(latR) * Math.cos(lonR), Math.cos(latR) * Math.sin(lonR), Math.sin(latR)];
+  const east = [-Math.sin(lonR), Math.cos(lonR), 0];
+  const north = [-Math.sin(latR) * Math.cos(lonR), -Math.sin(latR) * Math.sin(lonR), Math.cos(latR)];
+  const project = p => ({ x: cx + earthR * p[0], y: cy - earthR * p[1], z: p[2] });
+  const colors = { GPS: '#00ff9f', Galileo: '#54c7ff', GLONASS: '#ffbf00', BeiDou: '#ff718d', QZSS: '#c694ff', SBAS: '#d6e64a', NavIC: '#ff9254', IMES: '#a5b4fc' };
+  const constellation = sat => String(sat.id || 'Unknown').replace(/\s+\S+$/, '');
+  const shellKm = { GPS: 20200, Galileo: 23222, GLONASS: 19100, BeiDou: 21528, QZSS: 35786, SBAS: 35786, NavIC: 35786, IMES: 0 };
+  const visible = (satellites || []).filter(s => s.azimuth !== null && s.elevation !== null && s.azimuth !== undefined && s.elevation !== undefined && Number.isFinite(Number(s.azimuth)) && Number.isFinite(Number(s.elevation)) && Number(s.elevation) >= 0);
+  const positioned = hasFix ? visible : [];
+  const summary = document.getElementById('orbit-summary');
+  summary.textContent = hasFix
+    ? `${visible.length} satellites · view centered on receiver · ${lat.toFixed(4)}°, ${lon.toFixed(4)}°`
+    : `${visible.length} satellites · waiting for a valid receiver position`;
+  const key = document.getElementById('orbit-key');
+  key.replaceChildren();
+  [...new Set(visible.map(constellation))].sort().forEach(name => {
+    const item = document.createElement('span');
+    const dot = document.createElement('i'); dot.style.background = colors[name] || '#d3ddd7';
+    item.append(dot, document.createTextNode(`${name} · ${shellKm[name] ? `${(shellKm[name] / 1000).toFixed(1)}k km` : 'orbit n/a'}`));
+    key.appendChild(item);
+  });
+
+  // Approximate circular shells are deliberately compressed to keep MEO/GEO visible in one view.
+  const shellRadius = km => earthR * (1 + .72 * Math.log1p(km / 6371) / Math.log1p(35786 / 6371));
+  const groups = [...new Set(positioned.map(constellation))];
+  groups.forEach((name, index) => {
+    const radius = shellRadius(shellKm[name] || 20200);
+    const tilt = ((index * 31 + 22) % 72 - 36) * Math.PI / 180;
+    ctx.beginPath();
+    for (let step = 0; step <= 180; step++) {
+      const t = step * Math.PI / 90;
+      const p = project([radius / earthR * Math.cos(t), radius / earthR * Math.sin(t) * Math.cos(tilt), radius / earthR * Math.sin(t) * Math.sin(tilt)]);
+      if (!step) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y);
+    }
+    ctx.strokeStyle = colors[name] || '#63736a'; ctx.globalAlpha = .25; ctx.lineWidth = 1; ctx.setLineDash([4, 6]); ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha = 1;
+  });
+
+  ctx.save();
+  ctx.beginPath(); ctx.arc(cx, cy, earthR, 0, Math.PI * 2); ctx.clip();
+  const ocean = ctx.createRadialGradient(cx - earthR * .35, cy - earthR * .4, earthR * .05, cx, cy, earthR * 1.25);
+  ocean.addColorStop(0, '#164534'); ocean.addColorStop(.72, '#0b2b21'); ocean.addColorStop(1, '#06130f');
+  ctx.fillStyle = ocean; ctx.fillRect(cx - earthR, cy - earthR, earthR * 2, earthR * 2);
+  // Equirectangular graticule projected orthographically, with the receiver at the center.
+  ctx.strokeStyle = 'rgba(111, 180, 143, .27)'; ctx.lineWidth = 1;
+  for (let latDeg = -60; latDeg <= 60; latDeg += 30) {
+    ctx.beginPath(); let started = false;
+    for (let lonDeg = -180; lonDeg <= 180; lonDeg += 3) {
+      const a = latDeg * Math.PI / 180, b = lonDeg * Math.PI / 180;
+      const v = [Math.cos(a) * Math.cos(b), Math.cos(a) * Math.sin(b), Math.sin(a)];
+      const p = project([v[0] * east[0] + v[1] * east[1] + v[2] * east[2], v[0] * north[0] + v[1] * north[1] + v[2] * north[2], v[0] * forward[0] + v[1] * forward[1] + v[2] * forward[2]]);
+      if (p.z < 0) { started = false; continue; }
+      if (!started) { ctx.moveTo(p.x, p.y); started = true; } else ctx.lineTo(p.x, p.y);
+    }
+    ctx.stroke();
+  }
+  for (let lonDeg = 0; lonDeg < 180; lonDeg += 30) {
+    ctx.beginPath(); let started = false;
+    for (let latDeg = -90; latDeg <= 90; latDeg += 3) {
+      const a = latDeg * Math.PI / 180, b = lonDeg * Math.PI / 180;
+      const v = [Math.cos(a) * Math.cos(b), Math.cos(a) * Math.sin(b), Math.sin(a)];
+      const p = project([v[0] * east[0] + v[1] * east[1] + v[2] * east[2], v[0] * north[0] + v[1] * north[1] + v[2] * north[2], v[0] * forward[0] + v[1] * forward[1] + v[2] * forward[2]]);
+      if (p.z < 0) { started = false; continue; }
+      if (!started) { ctx.moveTo(p.x, p.y); started = true; } else ctx.lineTo(p.x, p.y);
+    }
+    ctx.stroke();
+  }
+  ctx.restore();
+  ctx.beginPath(); ctx.arc(cx, cy, earthR, 0, Math.PI * 2); ctx.strokeStyle = '#347354'; ctx.lineWidth = 1.5; ctx.stroke();
+
+  if (hasFix) {
+    ctx.beginPath(); ctx.arc(cx, cy, 4, 0, Math.PI * 2); ctx.fillStyle = '#fff'; ctx.fill();
+    ctx.beginPath(); ctx.arc(cx, cy, 8, 0, Math.PI * 2); ctx.strokeStyle = '#00ff9f'; ctx.lineWidth = 1.5; ctx.stroke();
+    ctx.fillStyle = '#d7e8de'; ctx.font = '11px JetBrains Mono, monospace'; ctx.fillText('RECEIVER', cx + 12, cy - 9);
+  }
+  const points = [];
+  positioned.forEach(sat => {
+    const az = Number(sat.azimuth) * Math.PI / 180, el = Number(sat.elevation) * Math.PI / 180;
+    const ray = [Math.cos(el) * Math.sin(az) * east[0] + Math.cos(el) * Math.cos(az) * north[0] + Math.sin(el) * forward[0],
+      Math.cos(el) * Math.sin(az) * east[1] + Math.cos(el) * Math.cos(az) * north[1] + Math.sin(el) * forward[1],
+      Math.cos(el) * Math.sin(az) * east[2] + Math.cos(el) * Math.cos(az) * north[2] + Math.sin(el) * forward[2]];
+    const name = constellation(sat), altitude = shellKm[name] || 20200;
+    // Solve the line/sphere intersection for the nominal orbital radius.
+    const r0 = 6371, orbitalR = r0 + altitude;
+    const dot = ray[0] * forward[0] + ray[1] * forward[1] + ray[2] * forward[2];
+    const discriminant = Math.max(0, (r0 * dot) ** 2 + orbitalR ** 2 - r0 ** 2);
+    const distance = -r0 * dot + Math.sqrt(discriminant);
+    const actual = [forward[0] * r0 + ray[0] * distance, forward[1] * r0 + ray[1] * distance, forward[2] * r0 + ray[2] * distance];
+    const actualR = Math.hypot(...actual), shownR = shellRadius(altitude) / earthR;
+    const scaled = actual.map(v => v * shownR / actualR);
+    const p = project([scaled[0] * east[0] + scaled[1] * east[1] + scaled[2] * east[2], scaled[0] * north[0] + scaled[1] * north[1] + scaled[2] * north[2], scaled[0] * forward[0] + scaled[1] * forward[1] + scaled[2] * forward[2]]);
+    points.push({ ...p, sat, name, color: colors[name] || '#d3ddd7', altitude });
+  });
+  points.sort((a, b) => a.z - b.z).forEach((point, index) => {
+    const { x, y, sat, color } = point;
+    ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(x, y); ctx.strokeStyle = color; ctx.globalAlpha = .22; ctx.lineWidth = 1; ctx.stroke(); ctx.globalAlpha = 1;
+    ctx.beginPath(); ctx.arc(x, y, sat.used ? 5 : 4, 0, Math.PI * 2); ctx.fillStyle = color; ctx.fill();
+    ctx.strokeStyle = sat.used ? '#00ff9f' : '#d3ddd7'; ctx.lineWidth = sat.used ? 2 : 1; ctx.stroke();
+    const side = index % 2 ? 1 : -1, labelX = x + side * 10;
+    ctx.font = '10px JetBrains Mono, monospace'; ctx.textAlign = side < 0 ? 'right' : 'left';
+    ctx.fillStyle = sat.used ? '#baffdc' : '#d3ddd7';
+    ctx.fillText(`${sat.id}${sat.used ? ' · USED' : ''}`, labelX, y - 7);
+  });
+  ctx.textAlign = 'left';
+}
+const orbitCanvas = document.getElementById('orbit-view');
+new ResizeObserver(() => drawOrbitView()).observe(orbitCanvas);
+window.addEventListener('resize', () => drawOrbitView());
+
 async function refresh() {
   try {
     const r = await fetch('/api/data');
@@ -1353,6 +1508,9 @@ async function refresh() {
     document.getElementById('satellite-status').textContent = d.gps.satellite_status;
     updateGpsMap(d.gps);
     updateSatelliteGraphics(d.gps.satellite_data);
+    orbitGps = d.gps;
+    orbitSatellites = d.gps.satellite_data || [];
+    drawOrbitView();
     document.getElementById('active-mode').textContent = d.mode === 'telemetry' ? 'GPS telemetry' : d.mode === 'corrections' ? 'RTCM corrections' : 'Stopped';
     document.getElementById('corrections-mode').classList.toggle('active', d.mode === 'corrections');
     document.getElementById('telemetry-mode').classList.toggle('active', d.mode === 'telemetry');
