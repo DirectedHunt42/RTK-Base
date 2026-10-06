@@ -542,6 +542,9 @@ HTML = r"""
     pointer-events: none;
   }
   #orbit-tooltip strong { display: block; color: var(--green); font-size: 12px; }
+  .orbit-tooltip-signal { display: flex; align-items: center; gap: 7px; }
+  .orbit-tooltip-signal .sat-cell { flex: 0 0 auto; height: 15px; }
+  .orbit-tooltip-signal .sat-cell i { width: 4px; }
   .orbit-foot { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; color: var(--dim); font-size: 11px; margin-top: 8px; }
   .orbit-key { display: flex; flex-wrap: wrap; gap: 12px; }
   .orbit-key span { white-space: nowrap; }
@@ -1451,15 +1454,19 @@ function drawOrbitView(gps = orbitGps, satellites = orbitSatellites) {
   // Equirectangular graticule projected orthographically, with the receiver at the center.
   ctx.strokeStyle = 'rgba(111, 180, 143, .27)'; ctx.lineWidth = 1;
   for (let latDeg = -60; latDeg <= 60; latDeg += 30) {
-    ctx.beginPath(); let started = false;
-    for (let lonDeg = -180; lonDeg <= 180; lonDeg += 3) {
-      const a = latDeg * Math.PI / 180, b = lonDeg * Math.PI / 180;
-      const v = [Math.cos(a) * Math.cos(b), Math.cos(a) * Math.sin(b), Math.sin(a)];
-      const p = project([v[0] * east[0] + v[1] * east[1] + v[2] * east[2], v[0] * north[0] + v[1] * north[1] + v[2] * north[2], v[0] * forward[0] + v[1] * forward[1] + v[2] * forward[2]]);
-      if (p.z < 0) { started = false; continue; }
-      if (!started) { ctx.moveTo(p.x, p.y); started = true; } else ctx.lineTo(p.x, p.y);
+    for (const frontSide of [false, true]) {
+      ctx.beginPath(); let started = false;
+      for (let lonDeg = -180; lonDeg <= 180; lonDeg += 3) {
+        const a = latDeg * Math.PI / 180, b = lonDeg * Math.PI / 180;
+        const v = [Math.cos(a) * Math.cos(b), Math.cos(a) * Math.sin(b), Math.sin(a)];
+        const p = project([v[0] * east[0] + v[1] * east[1] + v[2] * east[2], v[0] * north[0] + v[1] * north[1] + v[2] * north[2], v[0] * forward[0] + v[1] * forward[1] + v[2] * forward[2]]);
+        const onFront = p.z >= 0;
+        if (onFront !== frontSide) { started = false; continue; }
+        if (!started) { ctx.moveTo(p.x, p.y); started = true; } else ctx.lineTo(p.x, p.y);
+      }
+      ctx.strokeStyle = frontSide ? 'rgba(111, 180, 143, .34)' : 'rgba(111, 180, 143, .18)';
+      ctx.setLineDash(frontSide ? [] : [2, 4]); ctx.stroke(); ctx.setLineDash([]);
     }
-    ctx.stroke();
   }
   for (let lonDeg = 0; lonDeg < 180; lonDeg += 30) {
     ctx.beginPath(); let started = false;
@@ -1510,7 +1517,6 @@ function drawOrbitView(gps = orbitGps, satellites = orbitSatellites) {
     const icon = orbitIcons[point.name];
     if (icon?.complete && icon.naturalWidth) ctx.drawImage(icon, x - 10, y - 10, 20, 20);
     else { ctx.beginPath(); ctx.arc(x, y, 6, 0, Math.PI * 2); ctx.fillStyle = color; ctx.fill(); }
-    ctx.beginPath(); ctx.arc(x, y, 10, 0, Math.PI * 2); ctx.strokeStyle = sat.used ? '#00ff9f' : color; ctx.lineWidth = sat.used ? 2 : 1; ctx.stroke();
     const side = index % 2 ? 1 : -1, labelX = x + side * 13;
     ctx.font = '10px JetBrains Mono, monospace'; ctx.textAlign = side < 0 ? 'right' : 'left';
     ctx.fillStyle = sat.used ? '#baffdc' : '#d3ddd7';
@@ -1530,11 +1536,21 @@ function showOrbitTooltip(point, clientX, clientY) {
   const title = document.createElement('strong'); title.textContent = point.sat.id;
   const lines = [
     `${point.name} · approx. ${(point.altitude / 1000).toFixed(1)}k km orbit`,
-    `Signal: ${Number.isFinite(signal) ? `${signal.toFixed(1)} dB-Hz` : 'unavailable'}`,
     `Az ${point.az.toFixed(1)}° · El ${point.el.toFixed(1)}°`,
     point.sat.used ? 'Used in current fix' : 'Visible · not used in fix'
   ];
   orbitTooltip.append(title, ...lines.map(line => { const row = document.createElement('div'); row.textContent = line; return row; }));
+  const signalRow = document.createElement('div'); signalRow.className = 'orbit-tooltip-signal';
+  const signalLabel = document.createElement('span'); signalLabel.textContent = 'Signal';
+  const signalBars = document.createElement('div');
+  const signalClassName = !Number.isFinite(signal) ? '' : signal < 20 ? 'signal-weak' : signal < 30 ? 'signal-fair' : signal < 40 ? 'signal-good' : 'signal-strong';
+  signalBars.className = `sat-cell ${signalClassName}`; signalBars.setAttribute('aria-hidden', 'true');
+  const strength = Number.isFinite(signal) ? Math.max(0, Math.min(4, Math.ceil(signal / 10))) : 0;
+  for (let index = 1; index <= 4; index += 1) {
+    const bar = document.createElement('i'); if (index <= strength) bar.className = 'on'; signalBars.appendChild(bar);
+  }
+  const signalValue = document.createElement('span'); signalValue.textContent = Number.isFinite(signal) ? `${signal.toFixed(1)} dB-Hz` : 'unavailable';
+  signalRow.append(signalLabel, signalBars, signalValue); orbitTooltip.appendChild(signalRow);
   orbitTooltip.style.display = 'block';
   const x = clientX - cardRect.left, y = clientY - cardRect.top;
   const left = Math.max(8, Math.min(card.clientWidth - orbitTooltip.offsetWidth - 8, x + 14));
@@ -1551,8 +1567,8 @@ orbitCanvas.addEventListener('pointermove', event => {
   if (orbitDrag) {
     const dx = event.clientX - orbitDrag.x, dy = event.clientY - orbitDrag.y;
     orbitDrag = { x: event.clientX, y: event.clientY };
-    orbitRotation.yaw += dx * .008;
-    orbitRotation.pitch = Math.max(-1.35, Math.min(1.35, orbitRotation.pitch + dy * .008));
+    orbitRotation.yaw -= dx * .008;
+    orbitRotation.pitch = Math.max(-1.35, Math.min(1.35, orbitRotation.pitch - dy * .008));
     drawOrbitView(); return;
   }
   const rect = orbitCanvas.getBoundingClientRect();
