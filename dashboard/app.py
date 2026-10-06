@@ -103,7 +103,7 @@ def get_wifi_data() -> dict:
         wireless[0] if wireless else None
     )
     result = {"interface": iface or "—", "ssid": "—", "signal": "—",
-              "quality": 0, "link": "No wireless interface detected"}
+              "dbm": None, "quality": 0, "link": "No wireless interface detected"}
     if not iface:
         return result
     result["link"] = "Not connected"
@@ -128,6 +128,7 @@ def get_wifi_data() -> dict:
                 try:
                     dbm = float(fields[1])
                     result["signal"] = f"{dbm:.0f} dBm"
+                    result["dbm"] = dbm
                     result["quality"] = max(0, min(100, round((dbm + 100) * 2)))
                 except ValueError:
                     pass
@@ -1312,14 +1313,17 @@ async function refresh() {
     document.getElementById('stream-uptime').textContent = d.stream_uptime;
     document.getElementById('wifi-interface').textContent = d.wifi.interface;
     document.getElementById('wifi-ssid').textContent = d.wifi.ssid;
-    const wifiStrength = Number(d.wifi.quality) || 0;
+    const wifiDbm = Number(d.wifi.dbm);
+    const hasWifiSignal = d.wifi.dbm !== null && Number.isFinite(wifiDbm);
+    const wifiThresholds = [-30, -60, -70, -80];
+    const activeWifiBars = hasWifiSignal ? wifiThresholds.filter(threshold => wifiDbm >= threshold).length : 0;
+    const wifiColorClass = !hasWifiSignal ? 'signal-none' : activeWifiBars <= 1 ? 'signal-weak' : activeWifiBars === 2 ? 'signal-fair' : activeWifiBars === 3 ? 'signal-good' : 'signal-strong';
     const wifiSignal = document.getElementById('wifi-signal');
-    const wifiColorClass = d.wifi.signal === '—' ? 'signal-none' : wifiStrength < 35 ? 'signal-weak' : wifiStrength < 65 ? 'signal-fair' : wifiStrength < 85 ? 'signal-good' : 'signal-strong';
     wifiSignal.textContent = d.wifi.signal;
     wifiSignal.className = wifiColorClass;
     document.querySelector('.wifi-icon').setAttribute('class', `wifi-icon ${wifiColorClass}`);
     document.querySelectorAll('.wifi-segment').forEach((segment, index) => {
-      segment.classList.toggle('active', wifiStrength >= (index + 1) * 25);
+      segment.classList.toggle('active', hasWifiSignal && wifiDbm >= wifiThresholds[index]);
     });
     document.getElementById('wifi-link').textContent = d.wifi.link;
     document.getElementById('wifi-frequency').textContent = d.wifi.frequency || '—';
