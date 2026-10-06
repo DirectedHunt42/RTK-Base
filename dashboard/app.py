@@ -5,14 +5,13 @@ Terminal-style web interface
 """
 
 from flask import Flask, render_template_string, jsonify, request, Response
-import json, subprocess, os, socket, psutil, time, re
+import json, subprocess, os, socket, psutil, time
 from datetime import datetime, timedelta
 from pathlib import Path
 
 app = Flask(__name__)
 APP_VERSION = (Path(__file__).resolve().parent / "VERSION").read_text(encoding="utf-8").strip()
 GNSS_NAMES = {0: "GPS", 1: "SBAS", 2: "Galileo", 3: "BeiDou", 4: "IMES", 5: "QZSS", 6: "GLONASS", 7: "NavIC"}
-RTCM_CLIENT_FIRST_SEEN = {}
 
 def run(cmd: str) -> str:
     try:
@@ -48,69 +47,9 @@ def get_listening() -> str:
         if len(line.split()) > 3 and any(line.split()[3].endswith(f":{port}") for port in ports)
     )
 
-def get_rtcm_clients() -> tuple[int, list]:
-    port = get_rtcm_port()
-    connections = run(f"ss -Htin state established '( sport = :{port} )'")
-    now = time.monotonic()
-    clients = []
-    connection_count = 0
-    current_client = None
-
-    for line in connections.splitlines():
-        fields = line.split()
-        if len(fields) >= 5 and fields[0] == "ESTAB":
-            connection_count += 1
-            if fields[3].rsplit(":", 1)[-1] != str(port):
-                current_client = None
-                continue
-            peer_endpoint = fields[4]
-            current_client = {
-                "endpoint": peer_endpoint,
-                "ip": peer_endpoint.rsplit(":", 1)[0].strip("[]"),
-                "rtt_ms": None,
-                "retransmissions": None,
-            }
-            clients.append(current_client)
-            continue
-
-        # ss -i places TCP details on an indented line after each socket row.
-        if current_client is None:
-            continue
-        rtt = re.search(r"\brtt:([0-9.]+)", line)
-        retrans = re.search(r"\bretrans:(\d+)/(\d+)", line)
-        if rtt:
-            current_client["rtt_ms"] = round(float(rtt.group(1)), 1)
-        if retrans:
-            current_client["retransmissions"] = int(retrans.group(2))
-
-    active_endpoints = {client["endpoint"] for client in clients}
-    for endpoint in active_endpoints:
-        RTCM_CLIENT_FIRST_SEEN.setdefault(endpoint, now)
-    for endpoint in list(RTCM_CLIENT_FIRST_SEEN):
-        if endpoint not in active_endpoints:
-            del RTCM_CLIENT_FIRST_SEEN[endpoint]
-
-    for client in clients:
-        client["connected_seconds"] = max(0, int(now - RTCM_CLIENT_FIRST_SEEN[client["endpoint"]]))
-        rtt_ms = client["rtt_ms"]
-        retransmissions = client["retransmissions"]
-        if rtt_ms is None and retransmissions is None:
-            client["stability"] = 0
-            client["stability_label"] = "TCP health unavailable"
-        else:
-            score = 5
-            if retransmissions is not None:
-                score -= min(3, retransmissions)
-            if rtt_ms is not None:
-                if rtt_ms > 500:
-                    score -= 2
-                elif rtt_ms > 150:
-                    score -= 1
-            score = max(1, score)
-            client["stability"] = score
-            client["stability_label"] = f"TCP health: {score} of 5 bars"
-
-    return connection_count, clients
+def get_rtcm_client_count() -> int:
+    connections = run(f"ss -Htn state established '( sport = :{get_rtcm_port()} )'")
+    return len(connections.splitlines()) if connections else 0
 
 def get_service_restarts() -> str:
     return run("systemctl show str2str.service -p NRestarts --value") or "0"
@@ -642,23 +581,7 @@ HTML = r"""
   .flow-legend .rx { color: var(--green); }
   .flow-legend .tx { color: var(--amber); }
   #traffic-chart { display: block; width: 100%; height: 170px; border: 1px solid var(--border); border-radius: 5px; background: #080c0a; }
-  .client-list { display: grid; gap: 5px; max-height: 125px; overflow: auto; color: #c8e6d5; font-size: 11px; }
   #flow-card { min-height: 0; overflow-y: auto; }
-  #flow-client-list { max-height: none; overflow: visible; flex: 0 0 auto; }
-  .client-row { display: flex; justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--border); padding: 4px 2px; overflow-wrap: anywhere; }
-  .client-entry { display: grid; gap: 4px; border-bottom: 1px solid var(--border); padding: 7px 2px; }
-  .client-entry-main, .client-entry-details { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-  .client-entry-main { color: #c8e6d5; }
-  .client-entry-details { color: var(--dim); font-size: 10px; }
-  .client-stability { display: inline-flex; align-items: end; gap: 2px; height: 14px; }
-  .client-stability i { display: block; width: 3px; height: 4px; border-radius: 1px; background: #39483e; }
-  .client-stability i:nth-child(2) { height: 6px; }
-  .client-stability i:nth-child(3) { height: 8px; }
-  .client-stability i:nth-child(4) { height: 11px; }
-  .client-stability i:nth-child(5) { height: 14px; }
-  .client-stability i.active { background: var(--green); }
-  .client-stability.unknown i { background: #59645d; }
-  .client-empty { color: var(--dim); }
   .wifi-icon { width: 34px; height: 28px; overflow: visible; }
   .wifi-icon path, .wifi-icon circle { fill: none; stroke: #555; stroke-width: 3; stroke-linecap: round; }
   .wifi-icon .active { stroke: var(--green); }
@@ -716,6 +639,8 @@ HTML = r"""
     color: var(--dim);
     font-size: 11px;
   }
+  footer a { color: var(--green); text-decoration: none; }
+  footer a:hover { text-decoration: underline; }
   #clock { color: var(--amber); }
   #update-terminal-screen {
     display: none;
@@ -918,6 +843,7 @@ HTML = r"""
 
     <div id="flow-card" class="card">
       <h2>RX / TX Data Flow</h2>
+      <div class="metric"><span>Connected clients</span><span id="flow-client-count">0</span></div>
       <div class="metric"><span>Interface</span><span id="flow-interface">&mdash;</span></div>
       <div class="metric"><span>RX / data in</span><span id="flow-rx-rate">&mdash;</span></div>
       <div class="metric"><span>TX / data out</span><span id="flow-tx-rate">&mdash;</span></div>
@@ -936,8 +862,6 @@ HTML = r"""
         <polyline id="traffic-rx-line" fill="none" stroke="#00ff88" stroke-width="2" points="" />
         <polyline id="traffic-tx-line" fill="none" stroke="#ffbf00" stroke-width="2" points="" />
       </svg>
-      <div class="metric"><span>RTCM connected clients</span><span id="flow-client-count">0</span></div>
-      <div id="flow-client-list" class="client-list" aria-live="polite"><span class="client-empty">No connected clients</span></div>
     </div>
 
     <div class="card">
@@ -1030,7 +954,8 @@ HTML = r"""
   </div>
 
   <footer>
-    RTK-Base Dashboard v{{ version }} · Raspberry Pi · data refreshes automatically
+    <a href="https://github.com/DirectedHunt42/RTK-Base" target="_blank" rel="noopener noreferrer">RTK-Base</a>
+    Dashboard v{{ version }} · Raspberry Pi · data refreshes automatically
   </footer>
 
   <section id="update-terminal-screen" role="dialog" aria-modal="true" aria-labelledby="update-terminal-title">
@@ -1067,20 +992,13 @@ function formatRate(bytesPerSecond) {
   if (bytesPerSecond >= 1024) return `${(bytesPerSecond / 1024).toFixed(1)} KiB/s`;
   return `${Math.round(bytesPerSecond)} B/s`;
 }
-function formatConnectionAge(seconds) {
-  if (seconds < 60) return `${seconds}s connected`;
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m ${seconds % 60}s connected`;
-  const hours = Math.floor(minutes / 60);
-  return `${hours}h ${minutes % 60}m connected`;
-}
 function formatChartTime(milliseconds) {
   if (milliseconds >= 60000) return `${Math.round(milliseconds / 60000)}m`;
   if (milliseconds >= 10000) return `${Math.round(milliseconds / 1000)}s`;
   const seconds = milliseconds / 1000;
   return `${Number(seconds.toFixed(1))}s`;
 }
-function updateTrafficPanel(traffic, clients, clientCount) {
+function updateTrafficPanel(traffic, clientCount) {
   const rx = Number(traffic.rx_rate) || 0;
   const tx = Number(traffic.tx_rate) || 0;
   document.getElementById('flow-interface').textContent = traffic.interface;
@@ -1132,51 +1050,6 @@ function updateTrafficPanel(traffic, clients, clientCount) {
   const historyLabel = elapsed >= 120000 ? 'last 2 minutes' : `history ${Math.floor(elapsed / 1000)}s / 2 minutes`;
   document.getElementById('flow-chart-scale').textContent = `Peak ${formatRate(max)} \u00b7 ${historyLabel}`;
   document.getElementById('flow-client-count').textContent = clientCount;
-  const list = document.getElementById('flow-client-list');
-  list.replaceChildren();
-  if (!clients.length) {
-    const empty = document.createElement('span');
-    empty.className = 'client-empty';
-    empty.textContent = 'No connected clients';
-    list.appendChild(empty);
-  } else {
-    clients.forEach((client, index) => {
-      const row = document.createElement('div');
-      row.className = 'client-entry';
-      const main = document.createElement('div');
-      main.className = 'client-entry-main';
-      const label = document.createElement('span');
-      label.textContent = `Client ${index + 1}`;
-      const ip = document.createElement('span');
-      ip.textContent = client.ip;
-      main.append(label, ip);
-
-      const details = document.createElement('div');
-      details.className = 'client-entry-details';
-      const age = document.createElement('span');
-      age.textContent = formatConnectionAge(client.connected_seconds);
-      const health = document.createElement('span');
-      health.className = `client-stability${client.stability ? '' : ' unknown'}`;
-      health.setAttribute('role', 'img');
-      health.setAttribute('aria-label', client.stability_label);
-      const healthText = client.stability ? `${client.stability}/5` : 'N/A';
-      health.title = client.stability_label
-        + (client.rtt_ms === null ? '' : ` · RTT ${client.rtt_ms} ms`)
-        + (client.retransmissions === null ? '' : ` · ${client.retransmissions} retransmissions`);
-      for (let bar = 1; bar <= 5; bar++) {
-        const segment = document.createElement('i');
-        if (bar <= client.stability) segment.className = 'active';
-        health.appendChild(segment);
-      }
-      const healthLabel = document.createElement('span');
-      healthLabel.textContent = healthText;
-      healthLabel.setAttribute('aria-hidden', 'true');
-      health.appendChild(healthLabel);
-      details.append(age, health);
-      row.append(main, details);
-      list.appendChild(row);
-    });
-  }
 }
 
 function setPanelCollapsed(header, collapsed) {
@@ -1374,7 +1247,7 @@ async function refresh() {
     document.getElementById('wifi-frequency').textContent = d.wifi.frequency || '—';
     document.getElementById('wifi-bitrate').textContent = d.wifi.bitrate || '—';
     document.getElementById('net-traffic').textContent = `${d.network_traffic.received} / ${d.network_traffic.sent} (${d.network_traffic.interface})`;
-    updateTrafficPanel(d.network_traffic, d.rtcm_client_ips || [], d.rtcm_clients);
+    updateTrafficPanel(d.network_traffic, d.rtcm_clients);
 
     const st = document.getElementById('str-status');
     st.textContent = d.str_status.toUpperCase();
@@ -1662,7 +1535,7 @@ def api_data():
     if not local_hostname.lower().endswith(".local"):
         local_hostname += ".local"
 
-    rtcm_client_count, rtcm_clients = get_rtcm_clients()
+    rtcm_client_count = get_rtcm_client_count()
 
     return jsonify({
         "version": APP_VERSION,
@@ -1680,7 +1553,6 @@ def api_data():
         "load": f"{load[0]:.2f}   {load[1]:.2f}   {load[2]:.2f}",
         "rtcm_port": get_rtcm_port(),
         "rtcm_clients": rtcm_client_count,
-        "rtcm_client_ips": rtcm_clients,
         "str_restarts": get_service_restarts(),
         "stream_uptime": get_stream_uptime(),
         "wifi": get_wifi_data(),
