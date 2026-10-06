@@ -47,9 +47,9 @@ def get_listening() -> str:
         if len(line.split()) > 3 and any(line.split()[3].endswith(f":{port}") for port in ports)
     )
 
-def get_rtcm_client_count() -> int:
+def get_rtcm_clients() -> list:
     connections = run(f"ss -Htn state established '( sport = :{get_rtcm_port()} )'")
-    return len(connections.splitlines()) if connections else 0
+    return [line.split()[4] for line in connections.splitlines() if len(line.split()) >= 5]
 
 def get_service_restarts() -> str:
     return run("systemctl show str2str.service -p NRestarts --value") or "0"
@@ -137,15 +137,30 @@ def get_wifi_data() -> dict:
             result["bitrate"] = line.split(":", 1)[1].strip()
     return result
 
+_traffic_sample = None
+
 def get_network_traffic() -> dict:
+    """Return default-interface totals and rates since the previous dashboard poll."""
+    global _traffic_sample
     iface = get_default_interface()
     counters = psutil.net_io_counters(pernic=True).get(iface) if iface else None
+    now = time.monotonic()
     if not counters:
-        return {"interface": iface or "—", "received": "—", "sent": "—"}
+        _traffic_sample = None
+        return {"interface": iface or "\u2014", "received": "\u2014", "sent": "\u2014", "rx_rate": 0, "tx_rate": 0}
+    rx_rate = tx_rate = 0
+    if _traffic_sample and _traffic_sample[0] == iface:
+        elapsed = now - _traffic_sample[1]
+        if elapsed > 0:
+            rx_rate = max(0, (counters.bytes_recv - _traffic_sample[2]) / elapsed)
+            tx_rate = max(0, (counters.bytes_sent - _traffic_sample[3]) / elapsed)
+    _traffic_sample = (iface, now, counters.bytes_recv, counters.bytes_sent)
     return {
         "interface": iface,
         "received": f"{counters.bytes_recv / (1024 ** 2):.1f} MiB",
         "sent": f"{counters.bytes_sent / (1024 ** 2):.1f} MiB",
+        "rx_rate": round(rx_rate),
+        "tx_rate": round(tx_rate),
     }
 
 def satellite_label(satellite: dict) -> str:
@@ -562,6 +577,13 @@ HTML = r"""
     transition: width 0.6s ease;
   }
   .wifi-signal-display { display: flex; align-items: center; gap: 10px; margin: 10px 0; }
+  .flow-legend { display: flex; gap: 16px; color: var(--dim); font-size: 11px; margin: 8px 0 2px; }
+  .flow-legend .rx { color: var(--green); }
+  .flow-legend .tx { color: var(--amber); }
+  #traffic-chart { display: block; width: 100%; height: 150px; border: 1px solid var(--border); border-radius: 5px; background: #080c0a; }
+  .client-list { display: grid; gap: 5px; max-height: 125px; overflow: auto; color: #c8e6d5; font-size: 11px; }
+  .client-row { display: flex; justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--border); padding: 4px 2px; overflow-wrap: anywhere; }
+  .client-empty { color: var(--dim); }
   .wifi-icon { width: 34px; height: 28px; overflow: visible; }
   .wifi-icon path, .wifi-icon circle { fill: none; stroke: #555; stroke-width: 3; stroke-linecap: round; }
   .wifi-icon .active { stroke: var(--green); }
@@ -820,6 +842,22 @@ HTML = r"""
     </div>
 
     <div class="card">
+      <h2>RX / TX Data Flow</h2>
+      <div class="metric"><span>Interface</span><span id="flow-interface">&mdash;</span></div>
+      <div class="metric"><span>RX / data in</span><span id="flow-rx-rate">&mdash;</span></div>
+      <div class="metric"><span>TX / data out</span><span id="flow-tx-rate">&mdash;</span></div>
+      <div class="metric"><span>Total RX / TX since boot</span><span id="flow-totals">&mdash;</span></div>
+      <div class="flow-legend"><span class="rx">&#9679; RX</span><span class="tx">&#9679; TX</span><span id="flow-chart-scale">Rate over last 2 minutes</span></div>
+      <svg id="traffic-chart" viewBox="0 0 600 150" role="img" aria-label="Network receive and transmit rates over the last two minutes">
+        <path d="M0 37.5H600 M0 75H600 M0 112.5H600" stroke="#1e3b2d" stroke-width="1" />
+        <polyline id="traffic-rx-line" fill="none" stroke="#00ff88" stroke-width="2" points="" />
+        <polyline id="traffic-tx-line" fill="none" stroke="#ffbf00" stroke-width="2" points="" />
+      </svg>
+      <div class="metric"><span>RTCM connected clients</span><span id="flow-client-count">0</span></div>
+      <div id="flow-client-list" class="client-list" aria-live="polite"><span class="client-empty">No connected clients</span></div>
+    </div>
+
+    <div class="card">
       <h2>GNSS / GPS</h2>
       <div class="metric"><span>Active mode</span><span id="active-mode">—</span></div>
       <div class="mode-controls">
@@ -940,6 +978,51 @@ const DOWNLOAD_ICON_URL = "{{ url_for('static', filename='download.svg') }}";
 let updateOutputOffset = 0;
 let updatePollTimer = null;
 let updateReturnTimer = null;
+const trafficHistory = [];
+function formatRate(bytesPerSecond) {
+  if (bytesPerSecond >= 1024 ** 2) return `${(bytesPerSecond / 1024 ** 2).toFixed(2)} MiB/s`;
+  if (bytesPerSecond >= 1024) return `${(bytesPerSecond / 1024).toFixed(1)} KiB/s`;
+  return `${Math.round(bytesPerSecond)} B/s`;
+}
+function updateTrafficPanel(traffic, clients) {
+  const rx = Number(traffic.rx_rate) || 0;
+  const tx = Number(traffic.tx_rate) || 0;
+  document.getElementById('flow-interface').textContent = traffic.interface;
+  document.getElementById('flow-rx-rate').textContent = formatRate(rx);
+  document.getElementById('flow-tx-rate').textContent = formatRate(tx);
+  document.getElementById('flow-totals').textContent = `${traffic.received} / ${traffic.sent}`;
+  trafficHistory.push({ rx, tx });
+  if (trafficHistory.length > 30) trafficHistory.shift();
+  const max = Math.max(1, ...trafficHistory.flatMap(point => [point.rx, point.tx]));
+  const toPoints = key => trafficHistory.map((point, index) => {
+    const x = trafficHistory.length < 2 ? 0 : index * 600 / (trafficHistory.length - 1);
+    const y = 140 - point[key] / max * 130;
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(' ');
+  document.getElementById('traffic-rx-line').setAttribute('points', toPoints('rx'));
+  document.getElementById('traffic-tx-line').setAttribute('points', toPoints('tx'));
+  document.getElementById('flow-chart-scale').textContent = `Peak ${formatRate(max)} \u00b7 last 2 minutes`;
+  document.getElementById('flow-client-count').textContent = clients.length;
+  const list = document.getElementById('flow-client-list');
+  list.replaceChildren();
+  if (!clients.length) {
+    const empty = document.createElement('span');
+    empty.className = 'client-empty';
+    empty.textContent = 'No connected clients';
+    list.appendChild(empty);
+  } else {
+    clients.forEach((address, index) => {
+      const row = document.createElement('div');
+      row.className = 'client-row';
+      const label = document.createElement('span');
+      label.textContent = `Client ${index + 1}`;
+      const ip = document.createElement('span');
+      ip.textContent = address;
+      row.append(label, ip);
+      list.appendChild(row);
+    });
+  }
+}
 
 function setPanelCollapsed(header, collapsed) {
   const panel = header.closest('.card');
@@ -1136,6 +1219,7 @@ async function refresh() {
     document.getElementById('wifi-frequency').textContent = d.wifi.frequency || '—';
     document.getElementById('wifi-bitrate').textContent = d.wifi.bitrate || '—';
     document.getElementById('net-traffic').textContent = `${d.network_traffic.received} / ${d.network_traffic.sent} (${d.network_traffic.interface})`;
+    updateTrafficPanel(d.network_traffic, d.rtcm_client_ips || []);
 
     const st = document.getElementById('str-status');
     st.textContent = d.str_status.toUpperCase();
@@ -1438,7 +1522,8 @@ def api_data():
         "disk_pct": disk.percent,
         "load": f"{load[0]:.2f}   {load[1]:.2f}   {load[2]:.2f}",
         "rtcm_port": get_rtcm_port(),
-        "rtcm_clients": get_rtcm_client_count(),
+        "rtcm_clients": len(rtcm_clients := get_rtcm_clients()),
+        "rtcm_client_ips": rtcm_clients,
         "str_restarts": get_service_restarts(),
         "stream_uptime": get_stream_uptime(),
         "wifi": get_wifi_data(),
