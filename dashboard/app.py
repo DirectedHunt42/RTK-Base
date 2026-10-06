@@ -1431,20 +1431,7 @@ function drawOrbitView(gps = orbitGps, satellites = orbitSatellites) {
     key.appendChild(item);
   });
 
-  // Approximate circular shells are deliberately compressed to keep MEO/GEO visible in one view.
   const shellRadius = km => earthR * (1 + .72 * Math.log1p(km / 6371) / Math.log1p(35786 / 6371));
-  const groups = [...new Set(positioned.map(constellation))];
-  groups.forEach((name, index) => {
-    const radius = shellRadius(shellKm[name] || 20200);
-    const tilt = ((index * 31 + 22) % 72 - 36) * Math.PI / 180;
-    ctx.beginPath();
-    for (let step = 0; step <= 180; step++) {
-      const t = step * Math.PI / 90;
-      const p = project([radius / earthR * Math.cos(t), radius / earthR * Math.sin(t) * Math.cos(tilt), radius / earthR * Math.sin(t) * Math.sin(tilt)]);
-      if (!step) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y);
-    }
-    ctx.strokeStyle = colors[name] || '#63736a'; ctx.globalAlpha = .25; ctx.lineWidth = 1; ctx.setLineDash([4, 6]); ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha = 1;
-  });
 
   ctx.save();
   ctx.beginPath(); ctx.arc(cx, cy, earthR, 0, Math.PI * 2); ctx.clip();
@@ -1469,15 +1456,19 @@ function drawOrbitView(gps = orbitGps, satellites = orbitSatellites) {
     }
   }
   for (let lonDeg = 0; lonDeg < 180; lonDeg += 30) {
-    ctx.beginPath(); let started = false;
-    for (let latDeg = -90; latDeg <= 90; latDeg += 3) {
-      const a = latDeg * Math.PI / 180, b = lonDeg * Math.PI / 180;
-      const v = [Math.cos(a) * Math.cos(b), Math.cos(a) * Math.sin(b), Math.sin(a)];
-      const p = project([v[0] * east[0] + v[1] * east[1] + v[2] * east[2], v[0] * north[0] + v[1] * north[1] + v[2] * north[2], v[0] * forward[0] + v[1] * forward[1] + v[2] * forward[2]]);
-      if (p.z < 0) { started = false; continue; }
-      if (!started) { ctx.moveTo(p.x, p.y); started = true; } else ctx.lineTo(p.x, p.y);
+    for (const frontSide of [false, true]) {
+      ctx.beginPath(); let started = false;
+      for (let latDeg = -90; latDeg <= 90; latDeg += 3) {
+        const a = latDeg * Math.PI / 180, b = lonDeg * Math.PI / 180;
+        const v = [Math.cos(a) * Math.cos(b), Math.cos(a) * Math.sin(b), Math.sin(a)];
+        const p = project([v[0] * east[0] + v[1] * east[1] + v[2] * east[2], v[0] * north[0] + v[1] * north[1] + v[2] * north[2], v[0] * forward[0] + v[1] * forward[1] + v[2] * forward[2]]);
+        const onFront = p.z >= 0;
+        if (onFront !== frontSide) { started = false; continue; }
+        if (!started) { ctx.moveTo(p.x, p.y); started = true; } else ctx.lineTo(p.x, p.y);
+      }
+      ctx.strokeStyle = frontSide ? 'rgba(111, 180, 143, .34)' : 'rgba(111, 180, 143, .18)';
+      ctx.setLineDash(frontSide ? [] : [2, 4]); ctx.stroke(); ctx.setLineDash([]);
     }
-    ctx.stroke();
   }
   ctx.restore();
   ctx.beginPath(); ctx.arc(cx, cy, earthR, 0, Math.PI * 2); ctx.strokeStyle = '#347354'; ctx.lineWidth = 1.5; ctx.stroke();
@@ -1510,17 +1501,13 @@ function drawOrbitView(gps = orbitGps, satellites = orbitSatellites) {
     const dx = (point.x - cx) / earthR, dy = (point.y - cy) / earthR;
     return dx * dx + dy * dy > 1 || point.z >= Math.sqrt(Math.max(0, 1 - dx * dx - dy * dy));
   });
-  orbitPoints.sort((a, b) => a.z - b.z).forEach((point, index) => {
-    const { x, y, sat, color } = point;
+  orbitPoints.sort((a, b) => a.z - b.z).forEach(point => {
+    const { x, y, color } = point;
     const receiver = project([0, 0, 1]);
     ctx.beginPath(); ctx.moveTo(receiver.x, receiver.y); ctx.lineTo(x, y); ctx.strokeStyle = color; ctx.globalAlpha = .22; ctx.lineWidth = 1; ctx.stroke(); ctx.globalAlpha = 1;
     const icon = orbitIcons[point.name];
     if (icon?.complete && icon.naturalWidth) ctx.drawImage(icon, x - 10, y - 10, 20, 20);
     else { ctx.beginPath(); ctx.arc(x, y, 6, 0, Math.PI * 2); ctx.fillStyle = color; ctx.fill(); }
-    const side = index % 2 ? 1 : -1, labelX = x + side * 13;
-    ctx.font = '10px JetBrains Mono, monospace'; ctx.textAlign = side < 0 ? 'right' : 'left';
-    ctx.fillStyle = sat.used ? '#baffdc' : '#d3ddd7';
-    ctx.fillText(`${sat.id}${sat.used ? ' · USED' : ''}`, labelX, y - 7);
   });
   ctx.textAlign = 'left';
 }
@@ -1568,7 +1555,7 @@ orbitCanvas.addEventListener('pointermove', event => {
     const dx = event.clientX - orbitDrag.x, dy = event.clientY - orbitDrag.y;
     orbitDrag = { x: event.clientX, y: event.clientY };
     orbitRotation.yaw -= dx * .008;
-    orbitRotation.pitch = Math.max(-1.35, Math.min(1.35, orbitRotation.pitch - dy * .008));
+    orbitRotation.pitch = Math.max(-1.35, Math.min(1.35, orbitRotation.pitch + dy * .008));
     drawOrbitView(); return;
   }
   const rect = orbitCanvas.getBoundingClientRect();
