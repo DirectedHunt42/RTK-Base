@@ -1,4 +1,8 @@
-# RTK-Base
+<p align="center">
+  <img src="dashboard/static/favicon.svg" alt="RTK-Base icon" width="64" height="64">
+</p>
+
+<h1 align="center">RTK-Base</h1>
 
 DIY RTK base station for a Raspberry Pi and u-blox GNSS receiver. The Pi reads
 the receiver and serves RTCM corrections over TCP for clients such as Mission
@@ -18,7 +22,7 @@ Planner.
 - Repository file tree with mappings to installed updater and service files
 - Satellite sky view, signal strengths, and receiver position map in telemetry mode
 
-Dashboard version: **0.8.0** (`dashboard/VERSION`)
+Dashboard version: **0.9.0** (`dashboard/VERSION`)
 
 ## Hardware
 
