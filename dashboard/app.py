@@ -580,7 +580,7 @@ HTML = r"""
   .flow-legend { display: flex; gap: 16px; color: var(--dim); font-size: 11px; margin: 8px 0 2px; }
   .flow-legend .rx { color: var(--green); }
   .flow-legend .tx { color: var(--amber); }
-  #traffic-chart { display: block; width: 100%; height: 150px; border: 1px solid var(--border); border-radius: 5px; background: #080c0a; }
+  #traffic-chart { display: block; width: 100%; height: 170px; border: 1px solid var(--border); border-radius: 5px; background: #080c0a; }
   .client-list { display: grid; gap: 5px; max-height: 125px; overflow: auto; color: #c8e6d5; font-size: 11px; }
   .client-row { display: flex; justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--border); padding: 4px 2px; overflow-wrap: anywhere; }
   .client-empty { color: var(--dim); }
@@ -848,8 +848,16 @@ HTML = r"""
       <div class="metric"><span>TX / data out</span><span id="flow-tx-rate">&mdash;</span></div>
       <div class="metric"><span>Total RX / TX since boot</span><span id="flow-totals">&mdash;</span></div>
       <div class="flow-legend"><span class="rx">&#9679; RX</span><span class="tx">&#9679; TX</span><span id="flow-chart-scale">Rate over last 2 minutes</span></div>
-      <svg id="traffic-chart" viewBox="0 0 600 150" role="img" aria-label="Network receive and transmit rates over the last two minutes">
-        <path d="M0 37.5H600 M0 75H600 M0 112.5H600" stroke="#1e3b2d" stroke-width="1" />
+      <svg id="traffic-chart" viewBox="0 0 600 170" role="img" aria-label="Network receive and transmit rates over the last two minutes">
+        <defs>
+          <linearGradient id="traffic-rx-fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#00ff88" stop-opacity="0.28"/><stop offset="100%" stop-color="#00ff88" stop-opacity="0.02"/></linearGradient>
+          <linearGradient id="traffic-tx-fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#ffbf00" stop-opacity="0.24"/><stop offset="100%" stop-color="#ffbf00" stop-opacity="0.02"/></linearGradient>
+        </defs>
+        <g id="traffic-y-labels" fill="#81988a" font-size="10" text-anchor="end"></g>
+        <g id="traffic-x-labels" fill="#81988a" font-size="10" text-anchor="middle"></g>
+        <g id="traffic-grid" stroke="#1e3b2d" stroke-width="1"></g>
+        <path id="traffic-rx-area" fill="url(#traffic-rx-fill)" d="" />
+        <path id="traffic-tx-area" fill="url(#traffic-tx-fill)" d="" />
         <polyline id="traffic-rx-line" fill="none" stroke="#00ff88" stroke-width="2" points="" />
         <polyline id="traffic-tx-line" fill="none" stroke="#ffbf00" stroke-width="2" points="" />
       </svg>
@@ -994,13 +1002,39 @@ function updateTrafficPanel(traffic, clients) {
   trafficHistory.push({ rx, tx });
   if (trafficHistory.length > 30) trafficHistory.shift();
   const max = Math.max(1, ...trafficHistory.flatMap(point => [point.rx, point.tx]));
-  const toPoints = key => trafficHistory.map((point, index) => {
-    const x = trafficHistory.length < 2 ? 0 : index * 600 / (trafficHistory.length - 1);
-    const y = 140 - point[key] / max * 130;
-    return `${x.toFixed(1)},${y.toFixed(1)}`;
-  }).join(' ');
-  document.getElementById('traffic-rx-line').setAttribute('points', toPoints('rx'));
-  document.getElementById('traffic-tx-line').setAttribute('points', toPoints('tx'));
+  const left = 62, right = 590, top = 12, bottom = 132;
+  const pointsFor = key => trafficHistory.map((point, index) => {
+    const x = trafficHistory.length < 2 ? left : left + index * (right - left) / (trafficHistory.length - 1);
+    const y = bottom - point[key] / max * (bottom - top);
+    return { x, y };
+  });
+  const writeSeries = (key, lineId, areaId) => {
+    const points = pointsFor(key);
+    document.getElementById(lineId).setAttribute('points', points.map(point => `${point.x.toFixed(1)},${point.y.toFixed(1)}`).join(' '));
+    const areaPath = points.length ? `M${points[0].x.toFixed(1)} ${bottom} L${points.map(point => `${point.x.toFixed(1)} ${point.y.toFixed(1)}`).join(' L')} L${points[points.length - 1].x.toFixed(1)} ${bottom} Z` : '';
+    document.getElementById(areaId).setAttribute('d', areaPath);
+  };
+  writeSeries('rx', 'traffic-rx-line', 'traffic-rx-area');
+  writeSeries('tx', 'traffic-tx-line', 'traffic-tx-area');
+  const svgNs = 'http://www.w3.org/2000/svg';
+  const yLabels = document.getElementById('traffic-y-labels');
+  const xLabels = document.getElementById('traffic-x-labels');
+  const grid = document.getElementById('traffic-grid');
+  yLabels.replaceChildren(); xLabels.replaceChildren(); grid.replaceChildren();
+  [0, 0.5, 1].forEach(fraction => {
+    const y = bottom - fraction * (bottom - top);
+    const line = document.createElementNS(svgNs, 'line');
+    line.setAttribute('x1', left); line.setAttribute('x2', right); line.setAttribute('y1', y); line.setAttribute('y2', y);
+    grid.appendChild(line);
+    const label = document.createElementNS(svgNs, 'text');
+    label.setAttribute('x', left - 7); label.setAttribute('y', y + 3); label.textContent = formatRate(max * fraction);
+    yLabels.appendChild(label);
+  });
+  [['−2m', left], ['−1m', (left + right) / 2], ['now', right]].forEach(([value, x]) => {
+    const label = document.createElementNS(svgNs, 'text');
+    label.setAttribute('x', x); label.setAttribute('y', 155); label.textContent = value;
+    xLabels.appendChild(label);
+  });
   document.getElementById('flow-chart-scale').textContent = `Peak ${formatRate(max)} \u00b7 last 2 minutes`;
   document.getElementById('flow-client-count').textContent = clients.length;
   const list = document.getElementById('flow-client-list');
