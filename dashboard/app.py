@@ -617,8 +617,8 @@ HTML = r"""
     z-index: 0;
   }
   .map-note { color: var(--dim); font-size: 11px; margin-top: 8px; }
-  .satellite-graphics { display: flex; justify-content: center; align-items: center; min-height: 0; padding: 4px 0; }
-  #satellite-sky { display: block; width: min(100%, 360px); height: auto; }
+  .satellite-graphics { display: flex; justify-content: center; align-items: center; min-height: 0; margin-top: -6px; padding: 0 0 4px; }
+  #satellite-sky { display: block; width: min(100%, 320px); height: auto; }
   .sky-ring { fill: none; stroke: #28523f; stroke-width: 1; }
   .sky-cross { stroke: #1e3b2d; stroke-width: 1; }
   .sky-cardinal { fill: var(--dim); font: 10px 'JetBrains Mono', monospace; text-anchor: middle; }
@@ -925,7 +925,7 @@ HTML = r"""
           <path class="sky-cross" d="M20 120h200M120 20v200" />
           <text class="sky-cardinal" x="120" y="12">N</text>
           <text class="sky-cardinal" x="228" y="123">E</text>
-          <text class="sky-cardinal" x="120" y="238">S</text>
+          <text class="sky-cardinal" x="120" y="232">S</text>
           <text class="sky-cardinal" x="12" y="123">W</text>
           <g id="sky-satellites"></g>
         </svg>
@@ -1156,7 +1156,7 @@ function updateSatelliteGraphics(satellites) {
   const list = document.getElementById('signal-list');
   const constellationList = document.getElementById('constellation-list');
   const skyLegend = document.getElementById('sky-legend');
-  const shapeKinds = { GPS: 'circle', SBAS: 'square', Galileo: 'triangle', BeiDou: 'diamond', IMES: 'pentagon', QZSS: 'hexagon', GLONASS: 'cross', NavIC: 'star' };
+  const shapeKinds = { GPS: 'circle', SBAS: 'square', Galileo: 'triangle', BeiDou: 'diamond', IMES: 'pentagon', QZSS: 'hexagon', GLONASS: 'plus', NavIC: 'star' };
   const constellationOf = satellite => String(satellite.id || 'Unknown').replace(/\s+\S+$/, '');
   const signalClass = signal => signal < 20 ? 'signal-weak' : signal < 30 ? 'signal-fair' : signal < 40 ? 'signal-good' : 'signal-strong';
   const appendShape = (svg, name, className, radius = 5) => {
@@ -1170,12 +1170,15 @@ function updateSatelliteGraphics(satellites) {
       shape.setAttribute('x', -radius); shape.setAttribute('y', -radius);
       shape.setAttribute('width', radius * 2); shape.setAttribute('height', radius * 2);
     } else {
-      const sides = { triangle: 3, diamond: 4, pentagon: 5, hexagon: 6, cross: 8, star: 10 }[kind] || 3;
-      const points = Array.from({ length: sides }, (_, index) => {
-        const angle = -Math.PI / 2 + index * Math.PI * 2 / sides;
-        const pointRadius = kind === 'star' && index % 2 ? radius * 0.45 : radius;
-        return `${(Math.cos(angle) * pointRadius).toFixed(1)},${(Math.sin(angle) * pointRadius).toFixed(1)}`;
-      }).join(' ');
+      const sides = { triangle: 3, diamond: 4, pentagon: 5, hexagon: 6, star: 10 }[kind] || 3;
+      const points = kind === 'plus'
+        ? [[-radius * .35, -radius], [radius * .35, -radius], [radius * .35, -radius * .35], [radius, -radius * .35], [radius, radius * .35], [radius * .35, radius * .35], [radius * .35, radius], [-radius * .35, radius], [-radius * .35, radius * .35], [-radius, radius * .35], [-radius, -radius * .35], [-radius * .35, -radius * .35]]
+            .map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(' ')
+        : Array.from({ length: sides }, (_, index) => {
+            const angle = -Math.PI / 2 + index * Math.PI * 2 / sides;
+            const pointRadius = kind === 'star' && index % 2 ? radius * 0.45 : radius;
+            return `${(Math.cos(angle) * pointRadius).toFixed(1)},${(Math.sin(angle) * pointRadius).toFixed(1)}`;
+          }).join(' ');
       shape = document.createElementNS(svgNamespace, 'polygon');
       shape.setAttribute('points', points);
     }
@@ -1311,8 +1314,10 @@ async function refresh() {
     document.getElementById('wifi-ssid').textContent = d.wifi.ssid;
     const wifiStrength = Number(d.wifi.quality) || 0;
     const wifiSignal = document.getElementById('wifi-signal');
+    const wifiColorClass = d.wifi.signal === '—' ? 'signal-none' : wifiStrength < 35 ? 'signal-weak' : wifiStrength < 65 ? 'signal-fair' : wifiStrength < 85 ? 'signal-good' : 'signal-strong';
     wifiSignal.textContent = d.wifi.signal;
-    wifiSignal.className = d.wifi.signal === '—' ? 'signal-none' : wifiStrength < 35 ? 'signal-weak' : wifiStrength < 65 ? 'signal-fair' : wifiStrength < 85 ? 'signal-good' : 'signal-strong';
+    wifiSignal.className = wifiColorClass;
+    document.querySelector('.wifi-icon').setAttribute('class', `wifi-icon ${wifiColorClass}`);
     document.querySelectorAll('.wifi-segment').forEach((segment, index) => {
       segment.classList.toggle('active', wifiStrength >= (index + 1) * 25);
     });
