@@ -48,8 +48,19 @@ def get_listening() -> str:
     )
 
 def get_rtcm_clients() -> list:
-    connections = run(f"ss -Htn state established '( sport = :{get_rtcm_port()} )'")
-    return [line.split()[4] for line in connections.splitlines() if len(line.split()) >= 5]
+    port = get_rtcm_port()
+    connections = run("ss -Htn state established")
+    clients = []
+    for line in connections.splitlines():
+        fields = line.split()
+        if len(fields) < 5:
+            continue
+        local_address, peer_address = fields[3], fields[4]
+        # In ss output, accepted stream sockets list the listening port on the
+        # local endpoint and the connected device on the peer endpoint.
+        if local_address.rsplit(":", 1)[-1] == str(port):
+            clients.append(peer_address)
+    return clients
 
 def get_service_restarts() -> str:
     return run("systemctl show str2str.service -p NRestarts --value") or "0"
