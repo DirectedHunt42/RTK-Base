@@ -5,13 +5,14 @@ Terminal-style web interface
 """
 
 from flask import Flask, render_template_string, jsonify, request, Response
-import json, subprocess, os, socket, psutil, time
+import json, subprocess, os, socket, psutil, time, re
 from datetime import datetime, timedelta
 from pathlib import Path
 
 app = Flask(__name__)
 APP_VERSION = (Path(__file__).resolve().parent / "VERSION").read_text(encoding="utf-8").strip()
 GNSS_NAMES = {0: "GPS", 1: "SBAS", 2: "Galileo", 3: "BeiDou", 4: "IMES", 5: "QZSS", 6: "GLONASS", 7: "NavIC"}
+RTCM_CLIENT_FIRST_SEEN = {}
 
 def run(cmd: str) -> str:
     try:
@@ -48,12 +49,68 @@ def get_listening() -> str:
     )
 
 def get_rtcm_clients() -> tuple[int, list]:
-    connections = run(f"ss -Htn state established '( sport = :{get_rtcm_port()} )'")
-    lines = connections.splitlines()
-    clients = [line.split()[4] for line in lines if len(line.split()) >= 5]
-    # Keep the original System panel behavior: count every matching established
-    # socket, even if an ss line is formatted unexpectedly for the address list.
-    return len(lines), clients
+    port = get_rtcm_port()
+    connections = run(f"ss -Htin state established '( sport = :{port} )'")
+    now = time.monotonic()
+    clients = []
+    connection_count = 0
+    current_client = None
+
+    for line in connections.splitlines():
+        fields = line.split()
+        if len(fields) >= 5 and fields[0] == "ESTAB":
+            connection_count += 1
+            if fields[3].rsplit(":", 1)[-1] != str(port):
+                current_client = None
+                continue
+            peer_endpoint = fields[4]
+            current_client = {
+                "endpoint": peer_endpoint,
+                "ip": peer_endpoint.rsplit(":", 1)[0].strip("[]"),
+                "rtt_ms": None,
+                "retransmissions": None,
+            }
+            clients.append(current_client)
+            continue
+
+        # ss -i places TCP details on an indented line after each socket row.
+        if current_client is None:
+            continue
+        rtt = re.search(r"\brtt:([0-9.]+)", line)
+        retrans = re.search(r"\bretrans:(\d+)/(\d+)", line)
+        if rtt:
+            current_client["rtt_ms"] = round(float(rtt.group(1)), 1)
+        if retrans:
+            current_client["retransmissions"] = int(retrans.group(2))
+
+    active_endpoints = {client["endpoint"] for client in clients}
+    for endpoint in active_endpoints:
+        RTCM_CLIENT_FIRST_SEEN.setdefault(endpoint, now)
+    for endpoint in list(RTCM_CLIENT_FIRST_SEEN):
+        if endpoint not in active_endpoints:
+            del RTCM_CLIENT_FIRST_SEEN[endpoint]
+
+    for client in clients:
+        client["connected_seconds"] = max(0, int(now - RTCM_CLIENT_FIRST_SEEN[client["endpoint"]]))
+        rtt_ms = client["rtt_ms"]
+        retransmissions = client["retransmissions"]
+        if rtt_ms is None and retransmissions is None:
+            client["stability"] = 0
+            client["stability_label"] = "TCP health unavailable"
+        else:
+            score = 5
+            if retransmissions is not None:
+                score -= min(3, retransmissions)
+            if rtt_ms is not None:
+                if rtt_ms > 500:
+                    score -= 2
+                elif rtt_ms > 150:
+                    score -= 1
+            score = max(1, score)
+            client["stability"] = score
+            client["stability_label"] = f"TCP health: {score} of 5 bars"
+
+    return connection_count, clients
 
 def get_service_restarts() -> str:
     return run("systemctl show str2str.service -p NRestarts --value") or "0"
@@ -589,6 +646,18 @@ HTML = r"""
   #flow-card { min-height: 0; overflow-y: auto; }
   #flow-client-list { max-height: none; overflow: visible; flex: 0 0 auto; }
   .client-row { display: flex; justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--border); padding: 4px 2px; overflow-wrap: anywhere; }
+  .client-entry { display: grid; gap: 4px; border-bottom: 1px solid var(--border); padding: 7px 2px; }
+  .client-entry-main, .client-entry-details { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .client-entry-main { color: #c8e6d5; }
+  .client-entry-details { color: var(--dim); font-size: 10px; }
+  .client-stability { display: inline-flex; align-items: end; gap: 2px; height: 14px; }
+  .client-stability i { display: block; width: 3px; height: 4px; border-radius: 1px; background: #39483e; }
+  .client-stability i:nth-child(2) { height: 6px; }
+  .client-stability i:nth-child(3) { height: 8px; }
+  .client-stability i:nth-child(4) { height: 11px; }
+  .client-stability i:nth-child(5) { height: 14px; }
+  .client-stability i.active { background: var(--green); }
+  .client-stability.unknown i { background: #59645d; }
   .client-empty { color: var(--dim); }
   .wifi-icon { width: 34px; height: 28px; overflow: visible; }
   .wifi-icon path, .wifi-icon circle { fill: none; stroke: #555; stroke-width: 3; stroke-linecap: round; }
@@ -998,6 +1067,19 @@ function formatRate(bytesPerSecond) {
   if (bytesPerSecond >= 1024) return `${(bytesPerSecond / 1024).toFixed(1)} KiB/s`;
   return `${Math.round(bytesPerSecond)} B/s`;
 }
+function formatConnectionAge(seconds) {
+  if (seconds < 60) return `${seconds}s connected`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ${seconds % 60}s connected`;
+  const hours = Math.floor(minutes / 60);
+  return `${hours}h ${minutes % 60}m connected`;
+}
+function formatChartTime(milliseconds) {
+  if (milliseconds >= 60000) return `${Math.round(milliseconds / 60000)}m`;
+  if (milliseconds >= 10000) return `${Math.round(milliseconds / 1000)}s`;
+  const seconds = milliseconds / 1000;
+  return `${Number(seconds.toFixed(1))}s`;
+}
 function updateTrafficPanel(traffic, clients, clientCount) {
   const rx = Number(traffic.rx_rate) || 0;
   const tx = Number(traffic.tx_rate) || 0;
@@ -1005,12 +1087,17 @@ function updateTrafficPanel(traffic, clients, clientCount) {
   document.getElementById('flow-rx-rate').textContent = formatRate(rx);
   document.getElementById('flow-tx-rate').textContent = formatRate(tx);
   document.getElementById('flow-totals').textContent = `${traffic.received} / ${traffic.sent}`;
-  trafficHistory.push({ rx, tx });
-  if (trafficHistory.length > 30) trafficHistory.shift();
+  const now = Date.now();
+  trafficHistory.push({ rx, tx, time: now });
+  while (trafficHistory.length > 1 && now - trafficHistory[0].time > 120000) trafficHistory.shift();
   const max = Math.max(1, ...trafficHistory.flatMap(point => [point.rx, point.tx]));
   const left = 62, right = 590, top = 12, bottom = 132;
+  const firstTime = trafficHistory[0].time;
+  const elapsed = Math.max(1000, now - firstTime);
+  const visibleSpan = Math.min(120000, elapsed);
+  const chartStart = now - visibleSpan;
   const pointsFor = key => trafficHistory.map((point, index) => {
-    const x = trafficHistory.length < 2 ? left : left + index * (right - left) / (trafficHistory.length - 1);
+    const x = left + Math.max(0, Math.min(1, (point.time - chartStart) / visibleSpan)) * (right - left);
     const y = bottom - point[key] / max * (bottom - top);
     return { x, y };
   });
@@ -1036,12 +1123,14 @@ function updateTrafficPanel(traffic, clients, clientCount) {
     label.setAttribute('x', left - 7); label.setAttribute('y', y + 3); label.textContent = formatRate(max * fraction);
     yLabels.appendChild(label);
   });
-  [['−2m', left], ['−1m', (left + right) / 2], ['now', right]].forEach(([value, x]) => {
+  const midpoint = visibleSpan / 2;
+  [[`−${formatChartTime(visibleSpan)}`, left], [`−${formatChartTime(midpoint)}`, (left + right) / 2], ['now', right]].forEach(([value, x]) => {
     const label = document.createElementNS(svgNs, 'text');
     label.setAttribute('x', x); label.setAttribute('y', 155); label.textContent = value;
     xLabels.appendChild(label);
   });
-  document.getElementById('flow-chart-scale').textContent = `Peak ${formatRate(max)} \u00b7 last 2 minutes`;
+  const historyLabel = elapsed >= 120000 ? 'last 2 minutes' : `history ${Math.floor(elapsed / 1000)}s / 2 minutes`;
+  document.getElementById('flow-chart-scale').textContent = `Peak ${formatRate(max)} \u00b7 ${historyLabel}`;
   document.getElementById('flow-client-count').textContent = clientCount;
   const list = document.getElementById('flow-client-list');
   list.replaceChildren();
@@ -1051,14 +1140,40 @@ function updateTrafficPanel(traffic, clients, clientCount) {
     empty.textContent = 'No connected clients';
     list.appendChild(empty);
   } else {
-    clients.forEach((address, index) => {
+    clients.forEach((client, index) => {
       const row = document.createElement('div');
-      row.className = 'client-row';
+      row.className = 'client-entry';
+      const main = document.createElement('div');
+      main.className = 'client-entry-main';
       const label = document.createElement('span');
       label.textContent = `Client ${index + 1}`;
       const ip = document.createElement('span');
-      ip.textContent = address;
-      row.append(label, ip);
+      ip.textContent = client.ip;
+      main.append(label, ip);
+
+      const details = document.createElement('div');
+      details.className = 'client-entry-details';
+      const age = document.createElement('span');
+      age.textContent = formatConnectionAge(client.connected_seconds);
+      const health = document.createElement('span');
+      health.className = `client-stability${client.stability ? '' : ' unknown'}`;
+      health.setAttribute('role', 'img');
+      health.setAttribute('aria-label', client.stability_label);
+      const healthText = client.stability ? `${client.stability}/5` : 'N/A';
+      health.title = client.stability_label
+        + (client.rtt_ms === null ? '' : ` · RTT ${client.rtt_ms} ms`)
+        + (client.retransmissions === null ? '' : ` · ${client.retransmissions} retransmissions`);
+      for (let bar = 1; bar <= 5; bar++) {
+        const segment = document.createElement('i');
+        if (bar <= client.stability) segment.className = 'active';
+        health.appendChild(segment);
+      }
+      const healthLabel = document.createElement('span');
+      healthLabel.textContent = healthText;
+      healthLabel.setAttribute('aria-hidden', 'true');
+      health.appendChild(healthLabel);
+      details.append(age, health);
+      row.append(main, details);
       list.appendChild(row);
     });
   }
