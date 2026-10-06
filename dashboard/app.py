@@ -47,20 +47,13 @@ def get_listening() -> str:
         if len(line.split()) > 3 and any(line.split()[3].endswith(f":{port}") for port in ports)
     )
 
-def get_rtcm_clients() -> list:
-    port = get_rtcm_port()
-    connections = run("ss -Htn state established")
-    clients = []
-    for line in connections.splitlines():
-        fields = line.split()
-        if len(fields) < 5:
-            continue
-        local_address, peer_address = fields[3], fields[4]
-        # In ss output, accepted stream sockets list the listening port on the
-        # local endpoint and the connected device on the peer endpoint.
-        if local_address.rsplit(":", 1)[-1] == str(port):
-            clients.append(peer_address)
-    return clients
+def get_rtcm_clients() -> tuple[int, list]:
+    connections = run(f"ss -Htn state established '( sport = :{get_rtcm_port()} )'")
+    lines = connections.splitlines()
+    clients = [line.split()[4] for line in lines if len(line.split()) >= 5]
+    # Keep the original System panel behavior: count every matching established
+    # socket, even if an ss line is formatted unexpectedly for the address list.
+    return len(lines), clients
 
 def get_service_restarts() -> str:
     return run("systemctl show str2str.service -p NRestarts --value") or "0"
@@ -1005,7 +998,7 @@ function formatRate(bytesPerSecond) {
   if (bytesPerSecond >= 1024) return `${(bytesPerSecond / 1024).toFixed(1)} KiB/s`;
   return `${Math.round(bytesPerSecond)} B/s`;
 }
-function updateTrafficPanel(traffic, clients) {
+function updateTrafficPanel(traffic, clients, clientCount) {
   const rx = Number(traffic.rx_rate) || 0;
   const tx = Number(traffic.tx_rate) || 0;
   document.getElementById('flow-interface').textContent = traffic.interface;
@@ -1049,7 +1042,7 @@ function updateTrafficPanel(traffic, clients) {
     xLabels.appendChild(label);
   });
   document.getElementById('flow-chart-scale').textContent = `Peak ${formatRate(max)} \u00b7 last 2 minutes`;
-  document.getElementById('flow-client-count').textContent = clients.length;
+  document.getElementById('flow-client-count').textContent = clientCount;
   const list = document.getElementById('flow-client-list');
   list.replaceChildren();
   if (!clients.length) {
@@ -1266,7 +1259,7 @@ async function refresh() {
     document.getElementById('wifi-frequency').textContent = d.wifi.frequency || '—';
     document.getElementById('wifi-bitrate').textContent = d.wifi.bitrate || '—';
     document.getElementById('net-traffic').textContent = `${d.network_traffic.received} / ${d.network_traffic.sent} (${d.network_traffic.interface})`;
-    updateTrafficPanel(d.network_traffic, d.rtcm_client_ips || []);
+    updateTrafficPanel(d.network_traffic, d.rtcm_client_ips || [], d.rtcm_clients);
 
     const st = document.getElementById('str-status');
     st.textContent = d.str_status.toUpperCase();
@@ -1554,6 +1547,8 @@ def api_data():
     if not local_hostname.lower().endswith(".local"):
         local_hostname += ".local"
 
+    rtcm_client_count, rtcm_clients = get_rtcm_clients()
+
     return jsonify({
         "version": APP_VERSION,
         "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -1569,7 +1564,7 @@ def api_data():
         "disk_pct": disk.percent,
         "load": f"{load[0]:.2f}   {load[1]:.2f}   {load[2]:.2f}",
         "rtcm_port": get_rtcm_port(),
-        "rtcm_clients": len(rtcm_clients := get_rtcm_clients()),
+        "rtcm_clients": rtcm_client_count,
         "rtcm_client_ips": rtcm_clients,
         "str_restarts": get_service_restarts(),
         "stream_uptime": get_stream_uptime(),
