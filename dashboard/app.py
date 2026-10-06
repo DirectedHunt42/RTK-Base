@@ -793,6 +793,7 @@ HTML = r"""
       <div class="metric"><span>Uptime</span><span id="uptime">–</span></div>
       <div class="metric"><span>Temperature</span><span id="temp">–</span></div>
       <div class="metric"><span>Primary IP</span><span id="ip">–</span></div>
+      <div class="metric"><span>Local Hostname</span><span id="local-hostname">–</span></div>
       <div class="metric"><span>Dashboard</span><span>HTTP :80</span></div>
     </div>
 
@@ -1108,6 +1109,7 @@ async function refresh() {
     document.getElementById('clock').textContent = d.time;
     document.getElementById('version').textContent = d.version;
     document.getElementById('hostname').textContent = d.hostname;
+    document.getElementById('local-hostname').textContent = d.local_hostname;
     document.getElementById('uptime').textContent = d.uptime;
     document.getElementById('temp').textContent = d.temp;
     document.getElementById('ip').textContent = d.ip;
@@ -1417,10 +1419,15 @@ def api_data():
     except Exception:
         pass
 
+    local_hostname = socket.gethostname()
+    if not local_hostname.lower().endswith(".local"):
+        local_hostname += ".local"
+
     return jsonify({
         "version": APP_VERSION,
         "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "hostname": socket.gethostname(),
+        "local_hostname": local_hostname,
         "uptime": get_uptime(),
         "temp": get_temp(),
         "ip": ip,
