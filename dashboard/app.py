@@ -582,6 +582,8 @@ HTML = r"""
   .flow-legend .tx { color: var(--amber); }
   #traffic-chart { display: block; width: 100%; height: 170px; border: 1px solid var(--border); border-radius: 5px; background: #080c0a; }
   .client-list { display: grid; gap: 5px; max-height: 125px; overflow: auto; color: #c8e6d5; font-size: 11px; }
+  #flow-card { min-height: 0; overflow-y: auto; }
+  #flow-client-list { max-height: none; overflow: visible; flex: 0 0 auto; }
   .client-row { display: flex; justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--border); padding: 4px 2px; overflow-wrap: anywhere; }
   .client-empty { color: var(--dim); }
   .wifi-icon { width: 34px; height: 28px; overflow: visible; }
@@ -841,7 +843,7 @@ HTML = r"""
       <pre id="str-log" class="scroll-fill" style="margin-top:12px; color:#aaa;"></pre>
     </div>
 
-    <div class="card">
+    <div id="flow-card" class="card">
       <h2>RX / TX Data Flow</h2>
       <div class="metric"><span>Interface</span><span id="flow-interface">&mdash;</span></div>
       <div class="metric"><span>RX / data in</span><span id="flow-rx-rate">&mdash;</span></div>

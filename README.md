@@ -18,7 +18,7 @@ Planner.
 - Repository file tree with mappings to installed updater and service files
 - Satellite sky view, signal strengths, and receiver position map in telemetry mode
 
-Dashboard version: **0.6.1** (`dashboard/VERSION`)
+Dashboard version: **0.6.2** (`dashboard/VERSION`)
 
 ## Hardware
 
