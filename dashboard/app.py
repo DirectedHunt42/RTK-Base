@@ -190,43 +190,46 @@ def get_gps_data() -> dict:
     }
     try:
         with socket.create_connection(("127.0.0.1", 2948), timeout=0.5) as conn:
-            conn.settimeout(1.0)
+            conn.settimeout(0.25)
             conn.sendall(b'?WATCH={"enable":true,"json":true};?POLL;\n')
-            stream = conn.makefile("r", encoding="utf-8", errors="replace")
             tpv = None
             sky = None
             sky_report_received = False
-            poll_received = False
-            for _ in range(30):
+            pending = b""
+            # TPV and SKY are separate GPSD reports. Keep reading after POLL/TPV
+            # so a fast position response cannot hide the satellite report.
+            deadline = time.monotonic() + 1.25
+            while time.monotonic() < deadline:
                 try:
-                    line = stream.readline()
+                    chunk = conn.recv(65536)
                 except socket.timeout:
-                    break
-                if not line:
-                    break
-                try:
-                    message = json.loads(line)
-                except json.JSONDecodeError:
                     continue
-                if message.get("class") == "TPV":
-                    tpv = message
-                elif message.get("class") == "SKY":
-                    sky = message
-                    sky_report_received = True
-                elif message.get("class") == "POLL":
-                    poll_received = True
-                    polled_tpv = message.get("tpv") or []
-                    polled_sky = message.get("sky") or []
-                    if polled_tpv:
-                        tpv = polled_tpv[-1]
-                    if polled_sky:
-                        sky = polled_sky[-1]
+                if not chunk:
+                    break
+                pending += chunk
+                lines = pending.split(b"\n")
+                pending = lines.pop()
+                for raw_line in lines:
+                    try:
+                        message = json.loads(raw_line.decode("utf-8", errors="replace"))
+                    except (json.JSONDecodeError, UnicodeDecodeError):
+                        continue
+                    if message.get("class") == "TPV":
+                        tpv = message
+                    elif message.get("class") == "SKY":
+                        sky = message
                         sky_report_received = True
-                if tpv and sky and (sky.get("satellites") or poll_received):
+                    elif message.get("class") == "POLL":
+                        polled_tpv = message.get("tpv") or []
+                        polled_sky = message.get("sky") or []
+                        if polled_tpv:
+                            tpv = polled_tpv[-1]
+                        if polled_sky:
+                            sky = polled_sky[-1]
+                            sky_report_received = True
+                if sky_report_received and (sky or {}).get("satellites"):
                     break
-                if tpv and poll_received:
-                    break
-            if tpv or sky:
+            if tpv or sky_report_received:
                 mode = (tpv or {}).get("mode", 0)
                 result["fix"] = {0: "No fix", 1: "No fix", 2: "2D fix", 3: "3D fix"}.get(mode, f"Mode {mode}")
                 if tpv and "lat" in tpv and "lon" in tpv:
