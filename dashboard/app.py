@@ -1455,7 +1455,7 @@ function drawOrbitView(gps = orbitGps, satellites = orbitSatellites) {
       ctx.setLineDash(frontSide ? [] : [2, 4]); ctx.stroke(); ctx.setLineDash([]);
     }
   }
-  for (let lonDeg = 0; lonDeg < 180; lonDeg += 30) {
+  for (let lonDeg = -180; lonDeg < 180; lonDeg += 30) {
     for (const frontSide of [false, true]) {
       ctx.beginPath(); let started = false;
       for (let latDeg = -90; latDeg <= 90; latDeg += 3) {
@@ -1470,6 +1470,28 @@ function drawOrbitView(gps = orbitGps, satellites = orbitSatellites) {
       ctx.setLineDash(frontSide ? [] : [2, 4]); ctx.stroke(); ctx.setLineDash([]);
     }
   }
+  const continentOutlines = [
+    [[-168, 65], [-150, 70], [-132, 58], [-126, 50], [-124, 42], [-117, 32], [-108, 28], [-104, 20], [-97, 17], [-90, 19], [-86, 10], [-81, 8], [-78, 18], [-82, 25], [-80, 32], [-74, 40], [-67, 45], [-59, 52], [-72, 58], [-82, 61], [-95, 70], [-120, 74], [-145, 72], [-168, 65]],
+    [[-52, 60], [-43, 60], [-35, 68], [-40, 78], [-51, 82], [-59, 76], [-52, 60]],
+    [[-81, 12], [-72, 10], [-63, 7], [-51, 2], [-47, -7], [-50, -15], [-54, -25], [-60, -35], [-68, -55], [-73, -45], [-70, -20], [-77, -5], [-81, 12]],
+    [[-11, 36], [-9, 44], [-5, 51], [2, 55], [12, 58], [23, 65], [34, 71], [45, 70], [55, 63], [67, 60], [80, 58], [94, 55], [108, 52], [122, 48], [133, 44], [143, 48], [153, 59], [166, 61], [179, 55], [170, 45], [160, 40], [150, 35], [141, 35], [132, 31], [122, 24], [114, 21], [108, 10], [100, 5], [96, 12], [88, 21], [80, 8], [75, 8], [72, 20], [65, 25], [56, 25], [50, 30], [44, 36], [35, 37], [28, 41], [20, 40], [14, 45], [7, 44], [2, 49], [-5, 48], [-10, 43], [-11, 36]],
+    [[-17, 37], [-5, 36], [10, 37], [26, 32], [33, 25], [43, 12], [51, 11], [50, 2], [43, -12], [40, -20], [32, -28], [27, -34], [18, -35], [12, -18], [8, -5], [2, 5], [-5, 5], [-9, 15], [-16, 20], [-17, 30], [-17, 37]],
+    [[112, -11], [130, -12], [145, -16], [153, -27], [146, -39], [135, -35], [124, -33], [115, -24], [112, -11]],
+    [[-180, -68], [-150, -70], [-120, -72], [-90, -70], [-60, -74], [-30, -70], [0, -73], [30, -70], [60, -74], [90, -70], [120, -72], [150, -69], [180, -70]]
+  ];
+  ctx.strokeStyle = 'rgba(119, 190, 148, .72)'; ctx.lineWidth = 1.2; ctx.setLineDash([]);
+  continentOutlines.forEach(outline => {
+    ctx.beginPath();
+    let started = false;
+    outline.forEach(([lonDeg, latDeg]) => {
+      const a = latDeg * Math.PI / 180, b = lonDeg * Math.PI / 180;
+      const v = [Math.cos(a) * Math.cos(b), Math.cos(a) * Math.sin(b), Math.sin(a)];
+      const p = project([v[0] * east[0] + v[1] * east[1] + v[2] * east[2], v[0] * north[0] + v[1] * north[1] + v[2] * north[2], v[0] * forward[0] + v[1] * forward[1] + v[2] * forward[2]]);
+      if (p.z < 0) { started = false; return; }
+      if (!started) { ctx.moveTo(p.x, p.y); started = true; } else ctx.lineTo(p.x, p.y);
+    });
+    ctx.stroke();
+  });
   ctx.restore();
   ctx.beginPath(); ctx.arc(cx, cy, earthR, 0, Math.PI * 2); ctx.strokeStyle = '#347354'; ctx.lineWidth = 1.5; ctx.stroke();
 
