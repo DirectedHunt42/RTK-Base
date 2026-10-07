@@ -348,14 +348,14 @@ DOWNLOAD_ITEMS = [
 REPO_ASSOCIATIONS = [
     {"source": "dashboard/", "target": "/opt/rtk-base/dashboard/"},
     {"source": "scripts/", "target": "/opt/rtk-base/scripts/"},
-    {"source": "scripts/set_mode.sh", "target": "/usr/local/sbin/rtk-base-set-mode"},
-    {"source": "scripts/start_str2str.py", "target": "/usr/local/sbin/rtk-base-start-str2str"},
-    {"source": "scripts/update.sh", "target": "/usr/local/sbin/rtk-base-update"},
-    {"source": "scripts/download_file.sh", "target": "/usr/local/sbin/rtk-base-download-file"},
-    {"source": "services/str2str.service", "target": "/etc/systemd/system/str2str.service"},
-    {"source": "services/rtk-dashboard.service", "target": "/etc/systemd/system/rtk-dashboard.service"},
-    {"source": "services/rtk-gpsd.service", "target": "/etc/systemd/system/rtk-gpsd.service"},
-    {"source": "services/rtk-base-nginx.conf", "target": "/etc/nginx/sites-available/rtk-base"},
+    {"source": "scripts/receiver/set_mode.sh", "target": "/usr/local/sbin/rtk-base-set-mode"},
+    {"source": "scripts/receiver/start_str2str.py", "target": "/usr/local/sbin/rtk-base-start-str2str"},
+    {"source": "scripts/maintenance/update.sh", "target": "/usr/local/sbin/rtk-base-update"},
+    {"source": "scripts/maintenance/download_file.sh", "target": "/usr/local/sbin/rtk-base-download-file"},
+    {"source": "services/systemd/str2str.service", "target": "/etc/systemd/system/str2str.service"},
+    {"source": "services/systemd/rtk-dashboard.service", "target": "/etc/systemd/system/rtk-dashboard.service"},
+    {"source": "services/systemd/rtk-gpsd.service", "target": "/etc/systemd/system/rtk-gpsd.service"},
+    {"source": "services/nginx/rtk-base.conf", "target": "/etc/nginx/sites-available/rtk-base"},
     {"source": "setup.sh", "target": "/etc/default/rtk-base", "kind": "generated"},
     {"source": "setup.sh", "target": "/etc/sudoers.d/rtk-base-dashboard", "kind": "generated"},
 ]
@@ -395,7 +395,7 @@ HTML = r"""
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>RTK-Base Dashboard</title>
-<link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
+<link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='icons/favicon.svg') }}">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
 <style>
@@ -894,23 +894,23 @@ HTML = r"""
     <div class="header-actions">
       <div class="header-action-buttons">
         <button id="files-button" class="dashboard-action update-button" type="button" aria-label="Files" onclick="openFileDialog()">
-          <img src="{{ url_for('static', filename='files-config.svg') }}" alt="" aria-hidden="true">
+          <img src="{{ url_for('static', filename='icons/files-config.svg') }}" alt="" aria-hidden="true">
           <span>Files</span>
         </button>
         <button id="readme-button" class="dashboard-action update-button" type="button" aria-label="View README" onclick="openReadmeDialog()">
-          <img src="{{ url_for('static', filename='readme.svg') }}" alt="" aria-hidden="true">
+          <img src="{{ url_for('static', filename='icons/readme.svg') }}" alt="" aria-hidden="true">
           <span>README</span>
         </button>
         <button id="license-button" class="dashboard-action update-button" type="button" aria-label="View licence" onclick="openLicenseDialog()">
-          <img src="{{ url_for('static', filename='license.svg') }}" alt="" aria-hidden="true">
+          <img src="{{ url_for('static', filename='icons/license.svg') }}" alt="" aria-hidden="true">
           <span>Licence</span>
         </button>
         <button id="update-button" class="dashboard-action update-button" type="button" aria-label="Update" onclick="updatePi()">
-          <img src="{{ url_for('static', filename='update.svg') }}" alt="" aria-hidden="true">
+          <img src="{{ url_for('static', filename='icons/update.svg') }}" alt="" aria-hidden="true">
           <span>Update</span>
         </button>
         <button id="reboot-button" class="dashboard-action reboot-button" type="button" aria-label="Reboot Pi" onclick="rebootPi()">
-          <img src="{{ url_for('static', filename='reboot.svg') }}" alt="" aria-hidden="true">
+          <img src="{{ url_for('static', filename='icons/reboot.svg') }}" alt="" aria-hidden="true">
           <span>Reboot Pi</span>
         </button>
       </div>
@@ -1071,13 +1071,13 @@ HTML = r"""
         <span id="orbit-summary">Waiting for receiver position and satellite sky view</span>
       </div>
       <div class="orbit-content">
-        <canvas id="orbit-view" role="img" aria-label="Three dimensional globe showing approximate positions of tracked GNSS satellites"></canvas>
+        <canvas id="orbit-view" role="img" aria-label="Earth, GNSS orbits, the Moon at true distance, and catalogued stars"></canvas>
         <aside id="orbit-legend" aria-label="Satellite constellation icon legend"></aside>
       </div>
       <div id="orbit-tooltip" role="status" aria-live="polite"></div>
       <div class="orbit-foot">
         <div id="orbit-key" class="orbit-key"></div>
-        <span>Drag to rotate · scroll to zoom · hover a satellite for details · positions are approximate.</span>
+        <span>Drag to rotate · scroll to zoom toward pointer · hover a satellite for details · GNSS orbit shells are compressed. Shift-drag to pan.</span>
       </div>
     </section>
   </div>
@@ -1138,32 +1138,45 @@ let mapHasFix = false;
 let orbitGps = { latitude: null, longitude: null };
 let orbitSatellites = [];
 let orbitRotation = { yaw: 0, pitch: 0 };
+let orbitPan = { x: 0, y: 0 };
 let orbitZoom = 1;
 let orbitPoints = [];
 const orbitTrailHistory = new Map();
 let orbitDrag = null;
 const ORBIT_ICON_URLS = {
-  GPS: "{{ url_for('static', filename='satellite-gps.svg') }}",
-  Galileo: "{{ url_for('static', filename='satellite-galileo.svg') }}",
-  GLONASS: "{{ url_for('static', filename='satellite-glonass.svg') }}",
-  BeiDou: "{{ url_for('static', filename='satellite-beidou.svg') }}",
-  QZSS: "{{ url_for('static', filename='satellite-qzss.svg') }}",
-  SBAS: "{{ url_for('static', filename='satellite-sbas.svg') }}",
-  NavIC: "{{ url_for('static', filename='satellite-navic.svg') }}",
-  IMES: "{{ url_for('static', filename='satellite-imes.svg') }}"
+  GPS: "{{ url_for('static', filename='icons/satellite-gps.svg') }}",
+  Galileo: "{{ url_for('static', filename='icons/satellite-galileo.svg') }}",
+  GLONASS: "{{ url_for('static', filename='icons/satellite-glonass.svg') }}",
+  BeiDou: "{{ url_for('static', filename='icons/satellite-beidou.svg') }}",
+  QZSS: "{{ url_for('static', filename='icons/satellite-qzss.svg') }}",
+  SBAS: "{{ url_for('static', filename='icons/satellite-sbas.svg') }}",
+  NavIC: "{{ url_for('static', filename='icons/satellite-navic.svg') }}",
+  IMES: "{{ url_for('static', filename='icons/satellite-imes.svg') }}"
 };
 const orbitIcons = Object.fromEntries(Object.entries(ORBIT_ICON_URLS).map(([name, url]) => {
   const image = new Image(); image.onload = () => drawOrbitView(); image.src = url; return [name, image];
 }));
 const baseStationOrbitIcon = new Image();
 baseStationOrbitIcon.onload = () => drawOrbitView();
-baseStationOrbitIcon.src = "{{ url_for('static', filename='base-station.svg') }}";
+baseStationOrbitIcon.src = "{{ url_for('static', filename='icons/base-station.svg') }}";
 let globeLandRings = [];
 // Natural Earth ne_110m_land coastline geometry (public domain; github.com/nvkelso/natural-earth-vector).
-fetch("{{ url_for('static', filename='globe-land.json') }}")
+fetch("{{ url_for('static', filename='data/globe-land.json') }}")
   .then(response => { if (!response.ok) throw new Error(`HTTP ${response.status}`); return response.json(); })
   .then(rings => { globeLandRings = rings; drawOrbitView(); })
   .catch(error => console.error('Could not load globe land outlines:', error));
+let globeMariaFeatures = [];
+// Mare geologic-unit polygons from the USGS Unified Geologic Map of the Moon (2020, CC0).
+fetch("{{ url_for('static', filename='data/globe-maria.json') }}")
+  .then(response => { if (!response.ok) throw new Error(`HTTP ${response.status}`); return response.json(); })
+  .then(data => { globeMariaFeatures = data.features || []; drawOrbitView(); })
+  .catch(error => console.error('Could not load lunar mare outlines:', error));
+let globeStarCatalog = [];
+// Bright-star positions and proper motions from ESA Gaia DR3 (ICRS, reference epoch J2016.0).
+fetch("{{ url_for('static', filename='data/globe-stars.json') }}")
+  .then(response => { if (!response.ok) throw new Error(`HTTP ${response.status}`); return response.json(); })
+  .then(stars => { globeStarCatalog = stars; drawOrbitView(); })
+  .catch(error => console.error('Could not load Gaia star catalog:', error));
 const orbitLegendDetails = { GPS: 'GPS · MEO', Galileo: 'Galileo · MEO', GLONASS: 'GLONASS · MEO', BeiDou: 'BeiDou · MEO*', QZSS: 'QZSS · IGSO/GEO', SBAS: 'SBAS · GEO', NavIC: 'NavIC · GEO/IGSO', IMES: 'IMES · varies' };
 function initializeOrbitLegend() {
   const legend = document.getElementById('orbit-legend');
@@ -1177,7 +1190,7 @@ function initializeOrbitLegend() {
   });
 }
 initializeOrbitLegend();
-const DOWNLOAD_ICON_URL = "{{ url_for('static', filename='download.svg') }}";
+const DOWNLOAD_ICON_URL = "{{ url_for('static', filename='icons/download.svg') }}";
 let updateOutputOffset = 0;
 let updatePollTimer = null;
 let updateReturnTimer = null;
@@ -1314,7 +1327,7 @@ function updateGpsMap(gps) {
   const position = L.latLng(lat, lon);
   if (!gpsMarker) {
     const baseStationIcon = L.icon({
-      iconUrl: "{{ url_for('static', filename='base-station.svg') }}",
+      iconUrl: "{{ url_for('static', filename='icons/base-station.svg') }}",
       iconSize: [40, 40], iconAnchor: [20, 20],
       tooltipAnchor: [0, -20],
       className: 'base-station-map-icon'
@@ -1479,16 +1492,11 @@ function drawOrbitView(gps = orbitGps, satellites = orbitSatellites, sampleTrail
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   const w = bounds.width, h = bounds.height;
   ctx.clearRect(0, 0, w, h);
-  // A quiet, repeatable star field in the scene background.
-  let starSeed = 0x51f15e;
-  const randomStar = () => { starSeed = (starSeed * 1664525 + 1013904223) >>> 0; return starSeed / 4294967296; };
-  for (let i = 0; i < 105; i += 1) {
-    const x = randomStar() * w, y = randomStar() * h, radius = .35 + randomStar() * .8;
-    ctx.beginPath(); ctx.arc(x, y, radius, 0, Math.PI * 2);
-    ctx.fillStyle = `rgba(190, 218, 207, ${.14 + randomStar() * .34})`; ctx.fill();
-  }
   const cx = w / 2, cy = h / 2 + 3;
   const earthR = Math.max(82, Math.min(h * .31, w * .16, 175)) * orbitZoom;
+  const rad = Math.PI / 180;
+  const jd = Date.now() / 86400000 + 2440587.5;
+  const gmst = ((280.46061837 + 360.98564736629 * (jd - 2451545)) % 360) * rad;
   const lat = Number(gps.latitude), lon = Number(gps.longitude);
   const hasFix = Number.isFinite(lat) && Number.isFinite(lon);
   const latR = (hasFix ? lat : 0) * Math.PI / 180;
@@ -1502,8 +1510,23 @@ function drawOrbitView(gps = orbitGps, satellites = orbitSatellites, sampleTrail
     const yawZ = p[0] * Math.sin(yaw) + p[2] * Math.cos(yaw);
     const y = p[1] * Math.cos(pitch) - yawZ * Math.sin(pitch);
     const z = p[1] * Math.sin(pitch) + yawZ * Math.cos(pitch);
-    return { x: cx + earthR * x, y: cy - earthR * y, z };
+    return { x: cx + orbitPan.x + earthR * x, y: cy + orbitPan.y - earthR * y, z };
   };
+  const starEpochYears = (jd - 2457388.5) / 365.25;
+  const starShellPx = Math.max(w, h) * .76;
+  globeStarCatalog.forEach(star => {
+    const dec = (Number(star.dec) + Number(star.pmdec) * starEpochYears / 3600000) * rad;
+    const cosDec = Math.cos(dec);
+    const ra = (Number(star.ra) + Number(star.pmra) * starEpochYears / (3600000 * Math.max(.01, Math.abs(cosDec)))) * rad - gmst;
+    const dir = [cosDec * Math.cos(ra), cosDec * Math.sin(ra), Math.sin(dec)];
+    const local = [dir[0] * east[0] + dir[1] * east[1] + dir[2] * east[2], dir[0] * north[0] + dir[1] * north[1] + dir[2] * north[2], dir[0] * forward[0] + dir[1] * forward[1] + dir[2] * forward[2]];
+    const p = project(local.map(value => value * starShellPx / earthR));
+    const magnitude = Number(star.phot_g_mean_mag);
+    const radius = Math.max(.45, Math.min(1.65, 1.45 - magnitude * .12));
+    const alpha = Math.max(.12, Math.min(.48, .62 - magnitude * .075));
+    ctx.beginPath(); ctx.arc(p.x, p.y, radius, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(153, 213, 176, ${alpha})`; ctx.fill();
+  });
   const colors = { GPS: '#00ff9f', Galileo: '#54c7ff', GLONASS: '#ffbf00', BeiDou: '#ff718d', QZSS: '#c694ff', SBAS: '#d6e64a', NavIC: '#ff9254', IMES: '#a5b4fc' };
   const constellation = sat => String(sat.id || 'Unknown').replace(/\s+\S+$/, '');
   const shellKm = { GPS: 20200, Galileo: 23222, GLONASS: 19100, BeiDou: 21528, QZSS: 35786, SBAS: 35786, NavIC: 35786, IMES: 0 };
@@ -1523,25 +1546,50 @@ function drawOrbitView(gps = orbitGps, satellites = orbitSatellites, sampleTrail
   });
 
   const shellRadius = km => earthR * (1 + .72 * Math.log1p(km / 6371) / Math.log1p(35786 / 6371));
-  // Low precision lunar elements (Schlyter), adequate for a decorative live position.
-  const days = Date.now() / 86400000 - 10956;
-  const rad = Math.PI / 180;
-  const node = (125.1228 - .0529538083 * days) * rad;
-  const peri = (318.0634 + .1643573223 * days) * rad;
-  const mean = ((115.3654 + 13.0649929509 * days) % 360) * rad;
-  const eccentric = mean + .0549 * Math.sin(mean) * (1 + .0549 * Math.cos(mean));
-  const xv = 60.2666 * (Math.cos(eccentric) - .0549), yv = 60.2666 * Math.sqrt(1 - .0549 ** 2) * Math.sin(eccentric);
-  const trueAnomaly = Math.atan2(yv, xv), lunarRadius = Math.hypot(xv, yv);
-  const lunarLon = trueAnomaly + peri;
-  const lunarEcl = [lunarRadius * (Math.cos(node) * Math.cos(lunarLon) - Math.sin(node) * Math.sin(lunarLon) * Math.cos(5.1454 * rad)),
-    lunarRadius * (Math.sin(node) * Math.cos(lunarLon) + Math.cos(node) * Math.sin(lunarLon) * Math.cos(5.1454 * rad)),
-    lunarRadius * Math.sin(lunarLon) * Math.sin(5.1454 * rad)];
+  // Truncated Meeus lunar longitude, latitude and range series.
+  const days = jd - 2451545;
+  const Lp = (218.3164477 + 13.17639648 * days) * rad;
+  const D = (297.8501921 + 12.19074912 * days) * rad;
+  const M = (357.5291092 + .98560028 * days) * rad;
+  const Mp = (134.9633964 + 13.06499295 * days) * rad;
+  const F = (93.272095 + 13.22935024 * days) * rad;
+  const lunarLongitude = Lp + (6.289 * Math.sin(Mp) + 1.274 * Math.sin(2 * D - Mp) + .658 * Math.sin(2 * D) + .214 * Math.sin(2 * Mp) - .186 * Math.sin(M)) * rad;
+  const lunarLatitude = (5.128 * Math.sin(F) + .280 * Math.sin(Mp + F) + .277 * Math.sin(Mp - F) + .173 * Math.sin(2 * D - F) + .055 * Math.sin(2 * D + F - Mp) + .046 * Math.sin(2 * D - F - Mp)) * rad;
+  const lunarDistanceKm = 385000.56 - 20905.4 * Math.cos(Mp) - 3699.1 * Math.cos(2 * D - Mp) - 2955.97 * Math.cos(2 * D) - 569.93 * Math.cos(2 * Mp) + 48.89 * Math.cos(2 * M);
+  const lunarEcl = [Math.cos(lunarLatitude) * Math.cos(lunarLongitude), Math.cos(lunarLatitude) * Math.sin(lunarLongitude), Math.sin(lunarLatitude)];
   const obliquity = 23.4393 * rad;
   const lunarEq = [lunarEcl[0], lunarEcl[1] * Math.cos(obliquity) - lunarEcl[2] * Math.sin(obliquity), lunarEcl[1] * Math.sin(obliquity) + lunarEcl[2] * Math.cos(obliquity)];
-  const jd = Date.now() / 86400000 + 2440587.5;
-  const gmst = ((280.46061837 + 360.98564736629 * (jd - 2451545)) % 360) * rad;
   const moonLon = Math.atan2(lunarEq[1], lunarEq[0]) - gmst, moonLat = Math.atan2(lunarEq[2], Math.hypot(lunarEq[0], lunarEq[1]));
   const moonWorld = [Math.cos(moonLat) * Math.cos(moonLon), Math.cos(moonLat) * Math.sin(moonLon), Math.sin(moonLat)];
+  const moonModel = [moonWorld[0] * east[0] + moonWorld[1] * east[1] + moonWorld[2] * east[2], moonWorld[0] * north[0] + moonWorld[1] * north[1] + moonWorld[2] * north[2], moonWorld[0] * forward[0] + moonWorld[1] * forward[1] + moonWorld[2] * forward[2]];
+  const moonProjected = project(moonModel.map(value => value * lunarDistanceKm / 6371));
+  const moonRadius = earthR * (1737.4 / 6371);
+  const moonVisible = moonProjected.x + moonRadius >= 0 && moonProjected.x - moonRadius <= w && moonProjected.y + moonRadius >= 0 && moonProjected.y - moonRadius <= h;
+  // Paint the Moon first so the Earth always occludes it where the two overlap.
+  if (moonVisible) {
+    ctx.save(); ctx.beginPath(); ctx.arc(moonProjected.x, moonProjected.y, moonRadius, 0, Math.PI * 2); ctx.clip();
+    const surface = ctx.createRadialGradient(moonProjected.x - moonRadius * .3, moonProjected.y - moonRadius * .36, moonRadius * .08, moonProjected.x, moonProjected.y, moonRadius);
+    surface.addColorStop(0, '#164534'); surface.addColorStop(.75, '#0b2b21'); surface.addColorStop(1, '#06130f');
+    ctx.fillStyle = surface; ctx.fillRect(moonProjected.x - moonRadius, moonProjected.y - moonRadius, moonRadius * 2, moonRadius * 2);
+    ctx.strokeStyle = 'rgba(0, 232, 137, .8)'; ctx.lineWidth = Math.max(.65, moonRadius * .018);
+    globeMariaFeatures.forEach(feature => {
+      const polygons = feature.geometry.type === 'Polygon' ? [feature.geometry.coordinates] : feature.geometry.coordinates;
+      polygons.forEach(polygon => polygon.forEach(ring => {
+        ctx.beginPath(); let started = false;
+        ring.forEach(([longitude, latitude]) => {
+          const lon = longitude * rad, lat = latitude * rad;
+          if (Math.cos(lat) * Math.cos(lon) <= 0) { started = false; return; }
+          const x = moonProjected.x + moonRadius * Math.cos(lat) * Math.sin(lon);
+          const y = moonProjected.y - moonRadius * Math.sin(lat);
+          if (!started) { ctx.moveTo(x, y); started = true; } else ctx.lineTo(x, y);
+        });
+        ctx.stroke();
+      }));
+    });
+    ctx.restore();
+    ctx.beginPath(); ctx.arc(moonProjected.x, moonProjected.y, moonRadius, 0, Math.PI * 2);
+    ctx.strokeStyle = 'rgba(0, 232, 137, .84)'; ctx.lineWidth = 1; ctx.stroke();
+  }
 
   ctx.save();
   ctx.beginPath(); ctx.arc(cx, cy, earthR, 0, Math.PI * 2); ctx.clip();
@@ -1620,40 +1668,6 @@ function drawOrbitView(gps = orbitGps, satellites = orbitSatellites, sampleTrail
   });
   ctx.restore();
   ctx.beginPath(); ctx.arc(cx, cy, earthR, 0, Math.PI * 2); ctx.strokeStyle = '#347354'; ctx.lineWidth = 1.5; ctx.stroke();
-
-  const moonModel = [moonWorld[0] * east[0] + moonWorld[1] * east[1] + moonWorld[2] * east[2], moonWorld[0] * north[0] + moonWorld[1] * north[1] + moonWorld[2] * north[2], moonWorld[0] * forward[0] + moonWorld[1] * forward[1] + moonWorld[2] * forward[2]];
-  const moonProjected = project(moonModel.map(value => value * shellRadius(lunarRadius * 6371) / earthR));
-  const moonRadius = Math.max(6, earthR * .273);
-  ctx.save(); ctx.shadowColor = 'rgba(190, 220, 235, .65)'; ctx.shadowBlur = 9;
-  ctx.beginPath(); ctx.arc(moonProjected.x, moonProjected.y, moonRadius, 0, Math.PI * 2);
-  const moonSurface = ctx.createRadialGradient(moonProjected.x - moonRadius * .32, moonProjected.y - moonRadius * .38, moonRadius * .08, moonProjected.x, moonProjected.y, moonRadius);
-  moonSurface.addColorStop(0, '#e0e2dc'); moonSurface.addColorStop(.72, '#b8c0c0'); moonSurface.addColorStop(1, '#78868b');
-  ctx.fillStyle = moonSurface; ctx.fill(); ctx.shadowBlur = 0;
-  // Near-side lunar maria, placed approximately in selenographic coordinates.
-  ctx.save(); ctx.beginPath(); ctx.arc(moonProjected.x, moonProjected.y, moonRadius, 0, Math.PI * 2); ctx.clip();
-  const maria = [
-    [-.25,-.60,.28,.18,-.25], // Mare Imbrium
-    [.20,-.48,.18,.13,.25], // Mare Serenitatis
-    [.23,-.22,.19,.11,-.2], // Mare Tranquillitatis
-    [.67,-.17,.16,.22,.1], // Mare Crisium
-    [.40,.15,.24,.16,.28], // Mare Fecunditatis
-    [.20,.39,.13,.12,-.2], // Mare Nectaris
-    [-.28,.42,.33,.16,-.12], // Mare Nubium
-    [-.53,.28,.16,.11,.2], // Mare Humorum
-    [-.58,-.04,.31,.18,.18] // Oceanus Procellarum
-  ];
-  ctx.fillStyle = 'rgba(91, 103, 108, .43)';
-  maria.forEach(([x,y,rx,ry,angle]) => { ctx.beginPath(); ctx.ellipse(moonProjected.x + x * moonRadius, moonProjected.y + y * moonRadius, rx * moonRadius, ry * moonRadius, angle, 0, Math.PI * 2); ctx.fill(); });
-  ctx.strokeStyle = 'rgba(73, 86, 92, .42)'; ctx.lineWidth = Math.max(.7, moonRadius * .025);
-  maria.forEach(([x,y,rx,ry,angle]) => { ctx.beginPath(); ctx.ellipse(moonProjected.x + x * moonRadius, moonProjected.y + y * moonRadius, rx * moonRadius, ry * moonRadius, angle, 0, Math.PI * 2); ctx.stroke(); });
-  // Approximate phase shading from the Sun direction in the ecliptic plane.
-  const sunMean = ((280.460 + .9856474 * (jd - 2451545)) % 360) * rad;
-  const elongation = Math.atan2(Math.sin(lunarLon - sunMean), Math.cos(lunarLon - sunMean));
-  const phase = Math.cos(elongation);
-  ctx.fillStyle = 'rgba(12, 20, 25, .43)';
-  ctx.beginPath(); ctx.ellipse(moonProjected.x + Math.sign(phase || 1) * moonRadius * .42, moonProjected.y, moonRadius * (1 - Math.abs(phase)) + .02, moonRadius, 0, 0, Math.PI * 2); ctx.fill();
-  ctx.restore();
-  ctx.font = '11px sans-serif'; ctx.fillStyle = 'rgba(210, 224, 229, .85)'; ctx.textAlign = 'center'; ctx.fillText(`Moon · ${(lunarRadius * 6371).toLocaleString()} km`, moonProjected.x, moonProjected.y - moonRadius - 7); ctx.restore();
 
   const receiverPoint = project([0, 0, 1]);
   if (hasFix) {
@@ -1752,16 +1766,21 @@ function showOrbitTooltip(point, clientX, clientY) {
 }
 orbitCanvas.addEventListener('pointerdown', event => {
   if (event.button !== 0 && event.pointerType === 'mouse') return;
-  orbitDrag = { x: event.clientX, y: event.clientY };
+  orbitDrag = { x: event.clientX, y: event.clientY, pan: event.shiftKey };
   orbitCanvas.classList.add('dragging'); orbitTooltip.style.display = 'none';
   orbitCanvas.setPointerCapture(event.pointerId); event.preventDefault();
 });
 orbitCanvas.addEventListener('pointermove', event => {
   if (orbitDrag) {
     const dx = event.clientX - orbitDrag.x, dy = event.clientY - orbitDrag.y;
+    const panMode = orbitDrag.pan;
     orbitDrag = { x: event.clientX, y: event.clientY };
-    orbitRotation.yaw -= dx * .008;
-    orbitRotation.pitch = Math.max(-1.35, Math.min(1.35, orbitRotation.pitch + dy * .008));
+    if (panMode) {
+      orbitPan.x += dx; orbitPan.y += dy;
+    } else {
+      orbitRotation.yaw -= dx * .008;
+      orbitRotation.pitch = Math.max(-1.35, Math.min(1.35, orbitRotation.pitch + dy * .008));
+    }
     drawOrbitView(); return;
   }
   const rect = orbitCanvas.getBoundingClientRect();
@@ -1775,7 +1794,13 @@ orbitCanvas.addEventListener('pointercancel', stopOrbitDrag);
 orbitCanvas.addEventListener('pointerleave', () => { if (!orbitDrag) orbitTooltip.style.display = 'none'; });
 orbitCanvas.addEventListener('wheel', event => {
   event.preventDefault();
-  orbitZoom = Math.max(.65, Math.min(2.2, orbitZoom * Math.exp(-event.deltaY * .001)));
+  const rect = orbitCanvas.getBoundingClientRect();
+  const anchorX = event.clientX - rect.left, anchorY = event.clientY - rect.top;
+  const oldZoom = orbitZoom;
+  orbitZoom = Math.max(.025, Math.min(12, orbitZoom * Math.exp(-event.deltaY * .001)));
+  const ratio = orbitZoom / oldZoom;
+  orbitPan.x = anchorX - rect.width / 2 - ratio * (anchorX - rect.width / 2 - orbitPan.x);
+  orbitPan.y = anchorY - rect.height / 2 - ratio * (anchorY - rect.height / 2 - orbitPan.y);
   drawOrbitView();
 }, { passive: false });
 
@@ -2039,7 +2064,7 @@ function renderReadme(markdown, target) {
     if (!line) { index += 1; continue; }
     if (line === '<p align="center">') { blocks.push('<div class="readme-center">'); index += 1; continue; }
     if (line === '</p>') { blocks.push('</div>'); index += 1; continue; }
-    const image = line.match(/^<img src="(dashboard\/static\/[\w.-]+\.svg)" alt="([^"]*)" width="(\d+)" height="(\d+)">$/);
+    const image = line.match(/^<img src="(dashboard\/static\/icons\/[\w.-]+\.svg)" alt="([^"]*)" width="(\d+)" height="(\d+)">$/);
     if (image) { blocks.push(`<img src="/static/${image[1].replace('dashboard/static/', '')}" alt="${escapeReadmeHtml(image[2])}" width="${image[3]}" height="${image[4]}">`); index += 1; continue; }
     const centeredHeading = line.match(/^<h1 align="center">(.*?)<\/h1>$/);
     if (centeredHeading) { blocks.push(`<h1 class="readme-center">${escapeReadmeHtml(centeredHeading[1])}</h1>`); index += 1; continue; }

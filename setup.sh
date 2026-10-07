@@ -65,17 +65,17 @@ echo "Dashboard service account: $DASHBOARD_USER"
 mkdir -p /opt/rtk-base
 cp -r dashboard /opt/rtk-base/
 cp -r scripts /opt/rtk-base/
-chmod +x /opt/rtk-base/scripts/*.sh 2>/dev/null || true
+find /opt/rtk-base/scripts -type f -name "*.sh" -exec chmod +x {} +
 
 echo "[3/7] Installing systemd services and web proxy..."
-cp services/str2str.service /etc/systemd/system/
-sed "s/^User=pi$/User=$DASHBOARD_USER/" services/rtk-dashboard.service > /etc/systemd/system/rtk-dashboard.service
-cp services/rtk-gpsd.service /etc/systemd/system/
-cp services/rtk-base-nginx.conf /etc/nginx/sites-available/rtk-base
-install -o root -g root -m 0755 scripts/set_mode.sh /usr/local/sbin/rtk-base-set-mode
-install -o root -g root -m 0755 scripts/start_str2str.py /usr/local/sbin/rtk-base-start-str2str
-install -o root -g root -m 0755 scripts/update.sh /usr/local/sbin/rtk-base-update
-install -o root -g root -m 0755 scripts/download_file.sh /usr/local/sbin/rtk-base-download-file
+cp services/systemd/str2str.service /etc/systemd/system/
+sed "s/^User=pi$/User=$DASHBOARD_USER/" services/systemd/rtk-dashboard.service > /etc/systemd/system/rtk-dashboard.service
+cp services/systemd/rtk-gpsd.service /etc/systemd/system/
+cp services/nginx/rtk-base.conf /etc/nginx/sites-available/rtk-base
+install -o root -g root -m 0755 scripts/receiver/set_mode.sh /usr/local/sbin/rtk-base-set-mode
+install -o root -g root -m 0755 scripts/receiver/start_str2str.py /usr/local/sbin/rtk-base-start-str2str
+install -o root -g root -m 0755 scripts/maintenance/update.sh /usr/local/sbin/rtk-base-update
+install -o root -g root -m 0755 scripts/maintenance/download_file.sh /usr/local/sbin/rtk-base-download-file
 printf '%s\n' "$REPO_DIR" > /etc/rtk-base-update-repo
 chmod 0644 /etc/rtk-base-update-repo
 printf '%s\n' "$DASHBOARD_USER ALL=(root) NOPASSWD: /usr/local/sbin/rtk-base-set-mode corrections, /usr/local/sbin/rtk-base-set-mode telemetry, /usr/local/sbin/rtk-base-update, /usr/local/sbin/rtk-base-download-file, /usr/bin/systemctl reboot" > /etc/sudoers.d/rtk-base-dashboard

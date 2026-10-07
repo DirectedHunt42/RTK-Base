@@ -1,12 +1,12 @@
 <p align="center">
-  <img src="dashboard/static/favicon.svg" alt="RTK-Base icon" width="64" height="64">
+  <img src="dashboard/static/icons/favicon.svg" alt="RTK-Base icon" width="64" height="64">
 </p>
 
 <h1 align="center">RTK-Base</h1>
 
 <p align="center">A Raspberry Pi RTK base station with an RTCM correction stream and a live GNSS diagnostics dashboard.</p>
 
-<p align="center"><strong>Dashboard version 0.9.12</strong></p>
+<p align="center"><strong>Dashboard version 0.10.0</strong></p>
 
 ## What it does
 
@@ -142,5 +142,16 @@ that the receiver has a valid GNSS fix or is producing usable RTCM corrections.
 | Dashboard | `http://<pi-ip>` (port 80) | Diagnostics and receiver telemetry |
 | RTCM stream | `tcp://<pi-ip>:<active-port>` | Corrections for RTK clients |
 | GPSD telemetry | Local service | Receiver data while telemetry mode is active |
+
+## Repository layout
+
+- `dashboard/` contains the Flask dashboard and its static assets. Icons and
+  geographic/catalog data are grouped under `dashboard/static/icons/` and
+  `dashboard/static/data/`.
+- `scripts/receiver/` contains receiver and operating-mode scripts.
+- `scripts/maintenance/` contains status, log-download, and update scripts.
+- `services/systemd/` contains service units; `services/nginx/` contains the
+  reverse-proxy configuration.
+- `setup.sh` installs the dashboard, scripts, and service configuration.
 
 Made for practical RTK base station monitoring in the field.
