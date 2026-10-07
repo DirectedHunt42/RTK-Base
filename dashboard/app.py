@@ -527,8 +527,8 @@ HTML = r"""
   #orbit-view { display: block; width: 100%; height: 100%; min-height: 390px; cursor: grab; touch-action: none; }
   #orbit-view.dragging { cursor: grabbing; }
   #orbit-legend { display: grid; align-content: center; gap: 8px; border-left: 1px solid var(--border); padding-left: 14px; }
-  .orbit-legend-item { display: grid; grid-template-columns: 56px 1fr; align-items: center; gap: 8px; color: var(--text); font-size: 11px; }
-  .orbit-legend-item img { width: 56px; height: 56px; }
+  .orbit-legend-item { display: grid; grid-template-columns: 42px 1fr; align-items: center; gap: 8px; color: var(--text); font-size: 11px; }
+  .orbit-legend-item img { width: 42px; height: 42px; }
   .orbit-legend-item small { display: block; color: var(--dim); font-size: 10px; margin-top: 2px; }
   #orbit-tooltip {
     display: none;
@@ -558,8 +558,8 @@ HTML = r"""
     .orbit-content { grid-template-columns: 1fr; grid-template-rows: minmax(300px, 1fr) auto; }
     #orbit-view { min-height: 300px; }
     #orbit-legend { grid-template-columns: repeat(4, minmax(0, 1fr)); border-left: 0; border-top: 1px solid var(--border); padding: 10px 0 0; gap: 7px; }
-    .orbit-legend-item { grid-template-columns: 42px 1fr; gap: 5px; font-size: 10px; }
-    .orbit-legend-item img { width: 42px; height: 42px; }
+    .orbit-legend-item { grid-template-columns: 32px 1fr; gap: 5px; font-size: 10px; }
+    .orbit-legend-item img { width: 31.5px; height: 31.5px; }
     .orbit-legend-item small { font-size: 9px; }
   }
   @media (max-width: 600px) { #orbit-card { min-height: 660px; } .orbit-content { grid-template-rows: minmax(280px, 1fr) auto; } #orbit-view { min-height: 280px; } #orbit-legend { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
@@ -1158,6 +1158,12 @@ const orbitIcons = Object.fromEntries(Object.entries(ORBIT_ICON_URLS).map(([name
 const baseStationOrbitIcon = new Image();
 baseStationOrbitIcon.onload = () => drawOrbitView();
 baseStationOrbitIcon.src = "{{ url_for('static', filename='base-station.svg') }}";
+let globeLandRings = [];
+// Natural Earth ne_110m_land coastline geometry (public domain; github.com/nvkelso/natural-earth-vector).
+fetch("{{ url_for('static', filename='globe-land.json') }}")
+  .then(response => { if (!response.ok) throw new Error(`HTTP ${response.status}`); return response.json(); })
+  .then(rings => { globeLandRings = rings; drawOrbitView(); })
+  .catch(error => console.error('Could not load globe land outlines:', error));
 const orbitLegendDetails = { GPS: 'GPS · MEO', Galileo: 'Galileo · MEO', GLONASS: 'GLONASS · MEO', BeiDou: 'BeiDou · MEO*', QZSS: 'QZSS · IGSO/GEO', SBAS: 'SBAS · GEO', NavIC: 'NavIC · GEO/IGSO', IMES: 'IMES · varies' };
 function initializeOrbitLegend() {
   const legend = document.getElementById('orbit-legend');
@@ -1547,27 +1553,8 @@ function drawOrbitView(gps = orbitGps, satellites = orbitSatellites, sampleTrail
       ctx.setLineDash(frontSide ? [] : [2, 4]); ctx.stroke(); ctx.setLineDash([]);
     }
   }
-  // Simplified lon/lat coastlines with additional vertices for major bays,
-  // peninsulas and island chains at this globe's display size.
-  const continentOutlines = [
-    [[-168,65],[-161,67],[-153,71],[-145,70],[-138, 60],[-132,55],[-128,50],[-124, 40],[-122,35],[-117,32],[-114,29],[-108,31],[-106, 31],[-103,26],[-97,22],[-93,18],[-89,16],[-86,20],[-82,24],[-80,29],[-81,33],[-78,35],[-75,39],[-72,41],[-69,44],[-66,46],[-60,50],[-58,54],[-63,57],[-70,59],[-77, 60],[-83,62],[-89,66],[-97,69],[-106,73],[-117,75],[-129,73],[-140,71],[-151,72],[-160,69],[-168,65]],
-    [[-52,60],[-46,59],[-42,62],[-39,66],[-35,70],[-39,76],[-44,80],[-51,83],[-56,81],[-59,77],[-54,72],[-58,67],[-52,60]],
-    [[-81,12],[-77,9],[-73,9],[-70,7],[-66,6],[-62,4],[-58,2],[-53,1],[-49,-2],[-47,-7],[-49,-12],[-52,-17],[-53,-22],[-57,-27],[-60,-33],[-64,-39],[-68,-47],[-71,-54],[-74,-51],[-75,-43],[-73,-35],[-71,-27],[-70,-19],[-73,-13],[-77,-7],[-79,0],[-81,6],[-81,12]],
-    [[-10,36],[-9,43],[-6,47],[-5,51],[-1,53],[3,55],[8,54],[12,56],[17,55],[20,58],[25, 60],[29,65],[33,69],[38,71],[43,69],[48,66],[53,62],[59,60],[66,58],[73,59],[80,57],[87,56],[94,54],[101,57],[108,55],[115,52],[122,49],[129,45],[136,47],[141,44],[146,46],[151,51],[157,57],[163,60],[170,60],[176,56],[179,51],[174,47],[168,44],[162,41],[156,38],[151,36],[146,38],[141, 40],[136,36],[131,34],[127,31],[123,26],[119,24],[116,21],[112,17],[109,12],[105,9],[102,6],[98,8],[96,14],[92,19],[88,22],[84,20],[80,9],[76,8],[73,12],[72,19],[68,23],[63,25],[58,25],[54,27],[50,30],[46,33],[42,36],[37,38],[33,42],[29,45],[25, 40],[20,39],[17,42],[14,45],[10,44],[7,43],[5,47],[1,49],[-4,48],[-8,44],[-10,40],[-10,36]],
-    [[-17,37],[-9,36],[-5,35],[1,36],[9,37],[15,35],[21,33],[27,32],[32,29],[34,25],[39,19],[43,13],[48,12],[51,11],[50,6],[49,1],[46,-3],[44,-9],[41,-14],[40,-19],[36,-23],[33,-27],[30,-31],[27,-34],[22,-35],[18,-34],[15,-30],[13,-24],[11,-18],[9,-11],[7,-5],[3,1],[-1,5],[-5,5],[-8,10],[-12,15],[-15,20],[-16,26],[-17,31],[-17,37]],
-    [[112,-11],[115,-13],[120,-14],[125,-14],[130,-12],[135,-13],[141,-16],[146,-19],[151,-24],[153,-29],[150,-34],[147,-38],[143,-39],[139,-36],[135,-34],[131,-33],[127,-34],[123,-33],[119,-30],[116,-26],[114,-21],[112,-16],[112,-11]],
-    [[-180,-70],[-165,-72],[-150,-75],[-138,-74],[-125,-71],[-112,-73],[-98,-75],[-82,-74],[-68,-77],[-54,-75],[-40,-72],[-25,-74],[-10,-76],[5,-74],[20,-72],[35,-74],[50,-77],[65,-75],[80,-72],[95,-74],[110,-76],[125,-73],[140,-72],[155,-69],[170,-70],[180,-70]],
-    // Major islands omitted by continent-scale silhouettes.
-    [[-24,63],[-22,66],[-18,66],[-14,64],[-16,63],[-20,63],[-24,63]], // Iceland
-    [[-8,50],[-6,52],[-5,55],[-3,58],[-5,59],[-7,57],[-8,54],[-10,52],[-8,50]], // Britain
-    [[-10,51],[-8,52],[-6,55],[-7,55],[-10,54],[-10,51]], // Ireland
-    [[47,-13],[50,-15],[50,-20],[49,-25],[47,-23],[44,-18],[45,-15],[47,-13]], // Madagascar
-    [[129,31],[132,33],[135,35],[139,37],[141,41],[144,44],[145,42],[142,38],[139,35],[136,34],[133,32],[129,31]], // Japan
-    [[95,5],[104,1],[110,-2],[116,-4],[122,-4],[128,-3],[133,-5],[130,-8],[123,-8],[117,-7],[111,-6],[106,-4],[101,-2],[97,1],[95,5]], // Indonesia
-    [[120,18],[122,14],[124,10],[122,7],[125,6],[127,9],[126,13],[124,18],[122,20],[120,18]], // Philippines
-    [[-85,22],[-82,23],[-79,22],[-77,20],[-75,20],[-73,21],[-76,23],[-80,23],[-83,22],[-85,22]], // Cuba
-    [[166,-34],[174,-37],[178,-41],[176,-44],[171,-46],[168,-43],[166,-40],[166,-34]] // New Zealand
-  ];
+  // Draw detailed Natural Earth coastlines, sampling edges smoothly at the horizon.
+  const continentOutlines = globeLandRings;
   ctx.strokeStyle = 'rgba(119, 190, 148, .78)'; ctx.lineWidth = 1.4; ctx.setLineDash([]);
   continentOutlines.forEach(outline => {
     ctx.beginPath();
@@ -1579,7 +1566,8 @@ function drawOrbitView(gps = orbitGps, satellites = orbitSatellites, sampleTrail
     };
     for (let index = 1; index < outline.length; index += 1) {
       const [lonA, latA] = outline[index - 1], [lonB, latB] = outline[index];
-      const steps = Math.max(1, Math.ceil(Math.max(Math.abs(lonB - lonA), Math.abs(latB - latA)) / 2));
+      const coastLonDistance = Math.abs(lonB - lonA) * Math.abs(Math.cos((latA + latB) * Math.PI / 360));
+      const steps = Math.max(1, Math.ceil(Math.max(coastLonDistance, Math.abs(latB - latA)) / 2));
       let previous = null;
       for (let step = 0; step <= steps; step += 1) {
         const t = step / steps;
@@ -1664,7 +1652,7 @@ function drawOrbitView(gps = orbitGps, satellites = orbitSatellites, sampleTrail
     const receiver = project([0, 0, 1]);
     ctx.beginPath(); ctx.moveTo(receiver.x, receiver.y); ctx.lineTo(x, y); ctx.strokeStyle = color; ctx.globalAlpha = .22; ctx.lineWidth = 1; ctx.stroke(); ctx.globalAlpha = 1;
     const icon = orbitIcons[point.name];
-    if (icon?.complete && icon.naturalWidth) ctx.drawImage(icon, x - 20, y - 20, 40, 40);
+    if (icon?.complete && icon.naturalWidth) ctx.drawImage(icon, x - 15, y - 15, 30, 30);
     else { ctx.beginPath(); ctx.arc(x, y, 6, 0, Math.PI * 2); ctx.fillStyle = color; ctx.fill(); }
   });
   ctx.textAlign = 'left';
