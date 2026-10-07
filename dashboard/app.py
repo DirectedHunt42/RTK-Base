@@ -469,7 +469,7 @@ HTML = r"""
     font-weight: 600;
     padding: 8px 12px;
   }
-  .dashboard-action img { width: 16px; height: 16px; }
+  .dashboard-action img { width: 18px; height: 18px; }
   .dashboard-action:hover { background: #002211; border-color: var(--green); }
   .dashboard-action:disabled { cursor: wait; opacity: 0.55; }
   .update-button { color: var(--green); }
