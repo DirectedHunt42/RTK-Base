@@ -1870,6 +1870,9 @@ async function openReadmeDialog() {
   const backdrop = document.getElementById('readme-dialog-backdrop');
   const content = document.getElementById('readme-content');
   const message = document.getElementById('readme-dialog-message');
+  const scrollbarWidth = window.innerWidth - document.documentElement.clientWidth;
+  const bodyPaddingRight = parseFloat(getComputedStyle(document.body).paddingRight) || 0;
+  document.body.style.paddingRight = `${bodyPaddingRight + scrollbarWidth}px`;
   backdrop.hidden = false;
   document.body.style.overflow = 'hidden';
   content.textContent = 'Loading README...'; message.textContent = '';
@@ -1910,8 +1913,12 @@ function renderReadme(markdown, target) {
     if (image) { blocks.push(`<img src="/static/${image[1].replace('dashboard/static/', '')}" alt="${escapeReadmeHtml(image[2])}" width="${image[3]}" height="${image[4]}">`); index += 1; continue; }
     const centeredHeading = line.match(/^<h1 align="center">(.*?)<\/h1>$/);
     if (centeredHeading) { blocks.push(`<h1 class="readme-center">${escapeReadmeHtml(centeredHeading[1])}</h1>`); index += 1; continue; }
-    const centeredParagraph = line.match(/^<p align="center"><strong>(.*?)<\/strong><\/p>$/);
-    if (centeredParagraph) { blocks.push(`<p class="readme-center"><strong>${escapeReadmeHtml(centeredParagraph[1])}</strong></p>`); index += 1; continue; }
+    const centeredParagraph = line.match(/^<p align="center">(.*?)<\/p>$/);
+    if (centeredParagraph) {
+      const bold = centeredParagraph[1].match(/^<strong>(.*?)<\/strong>$/);
+      const content = bold ? `<strong>${escapeReadmeHtml(bold[1])}</strong>` : readmeInline(centeredParagraph[1]);
+      blocks.push(`<p class="readme-center">${content}</p>`); index += 1; continue;
+    }
     const fence = line.match(/^```(.*)$/);
     if (fence) {
       const code = []; index += 1;
