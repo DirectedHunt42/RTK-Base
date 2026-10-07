@@ -1071,13 +1071,13 @@ HTML = r"""
         <span id="orbit-summary">Waiting for receiver position and satellite sky view</span>
       </div>
       <div class="orbit-content">
-        <canvas id="orbit-view" role="img" aria-label="Earth, GNSS orbits, the Moon at true distance, and catalogued stars"></canvas>
+        <canvas id="orbit-view" role="img" aria-label="Earth, GNSS orbits, and catalogued stars"></canvas>
         <aside id="orbit-legend" aria-label="Satellite constellation icon legend"></aside>
       </div>
       <div id="orbit-tooltip" role="status" aria-live="polite"></div>
       <div class="orbit-foot">
         <div id="orbit-key" class="orbit-key"></div>
-        <span>Drag to rotate · scroll to zoom toward pointer · hover a satellite for details · GNSS orbit shells are compressed. Shift-drag to pan.</span>
+        <span>Drag to rotate · scroll to zoom · hover a satellite for details · GNSS orbit shells are compressed.</span>
       </div>
     </section>
   </div>
@@ -1138,7 +1138,6 @@ let mapHasFix = false;
 let orbitGps = { latitude: null, longitude: null };
 let orbitSatellites = [];
 let orbitRotation = { yaw: 0, pitch: 0 };
-let orbitPan = { x: 0, y: 0 };
 let orbitZoom = 1;
 let orbitPoints = [];
 const orbitTrailHistory = new Map();
@@ -1165,12 +1164,6 @@ fetch("{{ url_for('static', filename='data/globe-land.json') }}")
   .then(response => { if (!response.ok) throw new Error(`HTTP ${response.status}`); return response.json(); })
   .then(rings => { globeLandRings = rings; drawOrbitView(); })
   .catch(error => console.error('Could not load globe land outlines:', error));
-let globeMariaFeatures = [];
-// Mare geologic-unit polygons from the USGS Unified Geologic Map of the Moon (2020, CC0).
-fetch("{{ url_for('static', filename='data/globe-maria.json') }}")
-  .then(response => { if (!response.ok) throw new Error(`HTTP ${response.status}`); return response.json(); })
-  .then(data => { globeMariaFeatures = data.features || []; drawOrbitView(); })
-  .catch(error => console.error('Could not load lunar mare outlines:', error));
 let globeStarCatalog = [];
 // Bright-star positions and proper motions from ESA Gaia DR3 (ICRS, reference epoch J2016.0).
 fetch("{{ url_for('static', filename='data/globe-stars.json') }}")
@@ -1510,7 +1503,7 @@ function drawOrbitView(gps = orbitGps, satellites = orbitSatellites, sampleTrail
     const yawZ = p[0] * Math.sin(yaw) + p[2] * Math.cos(yaw);
     const y = p[1] * Math.cos(pitch) - yawZ * Math.sin(pitch);
     const z = p[1] * Math.sin(pitch) + yawZ * Math.cos(pitch);
-    return { x: cx + orbitPan.x + earthR * x, y: cy + orbitPan.y - earthR * y, z };
+    return { x: cx + earthR * x, y: cy - earthR * y, z };
   };
   const starEpochYears = (jd - 2457388.5) / 365.25;
   const starShellPx = Math.max(w, h) * .76;
@@ -1521,6 +1514,7 @@ function drawOrbitView(gps = orbitGps, satellites = orbitSatellites, sampleTrail
     const dir = [cosDec * Math.cos(ra), cosDec * Math.sin(ra), Math.sin(dec)];
     const local = [dir[0] * east[0] + dir[1] * east[1] + dir[2] * east[2], dir[0] * north[0] + dir[1] * north[1] + dir[2] * north[2], dir[0] * forward[0] + dir[1] * forward[1] + dir[2] * forward[2]];
     const p = project(local.map(value => value * starShellPx / earthR));
+    if (p.z >= 0) return;
     const magnitude = Number(star.phot_g_mean_mag);
     const radius = Math.max(.45, Math.min(1.65, 1.45 - magnitude * .12));
     const alpha = Math.max(.12, Math.min(.48, .62 - magnitude * .075));
@@ -1546,51 +1540,6 @@ function drawOrbitView(gps = orbitGps, satellites = orbitSatellites, sampleTrail
   });
 
   const shellRadius = km => earthR * (1 + .72 * Math.log1p(km / 6371) / Math.log1p(35786 / 6371));
-  // Truncated Meeus lunar longitude, latitude and range series.
-  const days = jd - 2451545;
-  const Lp = (218.3164477 + 13.17639648 * days) * rad;
-  const D = (297.8501921 + 12.19074912 * days) * rad;
-  const M = (357.5291092 + .98560028 * days) * rad;
-  const Mp = (134.9633964 + 13.06499295 * days) * rad;
-  const F = (93.272095 + 13.22935024 * days) * rad;
-  const lunarLongitude = Lp + (6.289 * Math.sin(Mp) + 1.274 * Math.sin(2 * D - Mp) + .658 * Math.sin(2 * D) + .214 * Math.sin(2 * Mp) - .186 * Math.sin(M)) * rad;
-  const lunarLatitude = (5.128 * Math.sin(F) + .280 * Math.sin(Mp + F) + .277 * Math.sin(Mp - F) + .173 * Math.sin(2 * D - F) + .055 * Math.sin(2 * D + F - Mp) + .046 * Math.sin(2 * D - F - Mp)) * rad;
-  const lunarDistanceKm = 385000.56 - 20905.4 * Math.cos(Mp) - 3699.1 * Math.cos(2 * D - Mp) - 2955.97 * Math.cos(2 * D) - 569.93 * Math.cos(2 * Mp) + 48.89 * Math.cos(2 * M);
-  const lunarEcl = [Math.cos(lunarLatitude) * Math.cos(lunarLongitude), Math.cos(lunarLatitude) * Math.sin(lunarLongitude), Math.sin(lunarLatitude)];
-  const obliquity = 23.4393 * rad;
-  const lunarEq = [lunarEcl[0], lunarEcl[1] * Math.cos(obliquity) - lunarEcl[2] * Math.sin(obliquity), lunarEcl[1] * Math.sin(obliquity) + lunarEcl[2] * Math.cos(obliquity)];
-  const moonLon = Math.atan2(lunarEq[1], lunarEq[0]) - gmst, moonLat = Math.atan2(lunarEq[2], Math.hypot(lunarEq[0], lunarEq[1]));
-  const moonWorld = [Math.cos(moonLat) * Math.cos(moonLon), Math.cos(moonLat) * Math.sin(moonLon), Math.sin(moonLat)];
-  const moonModel = [moonWorld[0] * east[0] + moonWorld[1] * east[1] + moonWorld[2] * east[2], moonWorld[0] * north[0] + moonWorld[1] * north[1] + moonWorld[2] * north[2], moonWorld[0] * forward[0] + moonWorld[1] * forward[1] + moonWorld[2] * forward[2]];
-  const moonProjected = project(moonModel.map(value => value * lunarDistanceKm / 6371));
-  const moonRadius = earthR * (1737.4 / 6371);
-  const moonVisible = moonProjected.x + moonRadius >= 0 && moonProjected.x - moonRadius <= w && moonProjected.y + moonRadius >= 0 && moonProjected.y - moonRadius <= h;
-  // Paint the Moon first so the Earth always occludes it where the two overlap.
-  if (moonVisible) {
-    ctx.save(); ctx.beginPath(); ctx.arc(moonProjected.x, moonProjected.y, moonRadius, 0, Math.PI * 2); ctx.clip();
-    const surface = ctx.createRadialGradient(moonProjected.x - moonRadius * .3, moonProjected.y - moonRadius * .36, moonRadius * .08, moonProjected.x, moonProjected.y, moonRadius);
-    surface.addColorStop(0, '#164534'); surface.addColorStop(.75, '#0b2b21'); surface.addColorStop(1, '#06130f');
-    ctx.fillStyle = surface; ctx.fillRect(moonProjected.x - moonRadius, moonProjected.y - moonRadius, moonRadius * 2, moonRadius * 2);
-    ctx.strokeStyle = 'rgba(0, 232, 137, .8)'; ctx.lineWidth = Math.max(.65, moonRadius * .018);
-    globeMariaFeatures.forEach(feature => {
-      const polygons = feature.geometry.type === 'Polygon' ? [feature.geometry.coordinates] : feature.geometry.coordinates;
-      polygons.forEach(polygon => polygon.forEach(ring => {
-        ctx.beginPath(); let started = false;
-        ring.forEach(([longitude, latitude]) => {
-          const lon = longitude * rad, lat = latitude * rad;
-          if (Math.cos(lat) * Math.cos(lon) <= 0) { started = false; return; }
-          const x = moonProjected.x + moonRadius * Math.cos(lat) * Math.sin(lon);
-          const y = moonProjected.y - moonRadius * Math.sin(lat);
-          if (!started) { ctx.moveTo(x, y); started = true; } else ctx.lineTo(x, y);
-        });
-        ctx.stroke();
-      }));
-    });
-    ctx.restore();
-    ctx.beginPath(); ctx.arc(moonProjected.x, moonProjected.y, moonRadius, 0, Math.PI * 2);
-    ctx.strokeStyle = 'rgba(0, 232, 137, .84)'; ctx.lineWidth = 1; ctx.stroke();
-  }
-
   ctx.save();
   ctx.beginPath(); ctx.arc(cx, cy, earthR, 0, Math.PI * 2); ctx.clip();
   const ocean = ctx.createRadialGradient(cx - earthR * .35, cy - earthR * .4, earthR * .05, cx, cy, earthR * 1.25);
@@ -1766,21 +1715,16 @@ function showOrbitTooltip(point, clientX, clientY) {
 }
 orbitCanvas.addEventListener('pointerdown', event => {
   if (event.button !== 0 && event.pointerType === 'mouse') return;
-  orbitDrag = { x: event.clientX, y: event.clientY, pan: event.shiftKey };
+  orbitDrag = { x: event.clientX, y: event.clientY };
   orbitCanvas.classList.add('dragging'); orbitTooltip.style.display = 'none';
   orbitCanvas.setPointerCapture(event.pointerId); event.preventDefault();
 });
 orbitCanvas.addEventListener('pointermove', event => {
   if (orbitDrag) {
     const dx = event.clientX - orbitDrag.x, dy = event.clientY - orbitDrag.y;
-    const panMode = orbitDrag.pan;
     orbitDrag = { x: event.clientX, y: event.clientY };
-    if (panMode) {
-      orbitPan.x += dx; orbitPan.y += dy;
-    } else {
-      orbitRotation.yaw -= dx * .008;
-      orbitRotation.pitch = Math.max(-1.35, Math.min(1.35, orbitRotation.pitch + dy * .008));
-    }
+    orbitRotation.yaw -= dx * .008;
+    orbitRotation.pitch = Math.max(-1.35, Math.min(1.35, orbitRotation.pitch + dy * .008));
     drawOrbitView(); return;
   }
   const rect = orbitCanvas.getBoundingClientRect();
@@ -1794,13 +1738,7 @@ orbitCanvas.addEventListener('pointercancel', stopOrbitDrag);
 orbitCanvas.addEventListener('pointerleave', () => { if (!orbitDrag) orbitTooltip.style.display = 'none'; });
 orbitCanvas.addEventListener('wheel', event => {
   event.preventDefault();
-  const rect = orbitCanvas.getBoundingClientRect();
-  const anchorX = event.clientX - rect.left, anchorY = event.clientY - rect.top;
-  const oldZoom = orbitZoom;
-  orbitZoom = Math.max(.025, Math.min(12, orbitZoom * Math.exp(-event.deltaY * .001)));
-  const ratio = orbitZoom / oldZoom;
-  orbitPan.x = anchorX - rect.width / 2 - ratio * (anchorX - rect.width / 2 - orbitPan.x);
-  orbitPan.y = anchorY - rect.height / 2 - ratio * (anchorY - rect.height / 2 - orbitPan.y);
+  orbitZoom = Math.max(.65, Math.min(2.2, orbitZoom * Math.exp(-event.deltaY * .001)));
   drawOrbitView();
 }, { passive: false });
 
