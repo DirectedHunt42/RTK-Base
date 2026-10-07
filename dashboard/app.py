@@ -1479,6 +1479,14 @@ function drawOrbitView(gps = orbitGps, satellites = orbitSatellites, sampleTrail
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   const w = bounds.width, h = bounds.height;
   ctx.clearRect(0, 0, w, h);
+  // A quiet, repeatable star field in the scene background.
+  let starSeed = 0x51f15e;
+  const randomStar = () => { starSeed = (starSeed * 1664525 + 1013904223) >>> 0; return starSeed / 4294967296; };
+  for (let i = 0; i < 105; i += 1) {
+    const x = randomStar() * w, y = randomStar() * h, radius = .35 + randomStar() * .8;
+    ctx.beginPath(); ctx.arc(x, y, radius, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(190, 218, 207, ${.14 + randomStar() * .34})`; ctx.fill();
+  }
   const cx = w / 2, cy = h / 2 + 3;
   const earthR = Math.max(82, Math.min(h * .31, w * .16, 175)) * orbitZoom;
   const lat = Number(gps.latitude), lon = Number(gps.longitude);
@@ -1515,6 +1523,25 @@ function drawOrbitView(gps = orbitGps, satellites = orbitSatellites, sampleTrail
   });
 
   const shellRadius = km => earthR * (1 + .72 * Math.log1p(km / 6371) / Math.log1p(35786 / 6371));
+  // Low precision lunar elements (Schlyter), adequate for a decorative live position.
+  const days = Date.now() / 86400000 - 10956;
+  const rad = Math.PI / 180;
+  const node = (125.1228 - .0529538083 * days) * rad;
+  const peri = (318.0634 + .1643573223 * days) * rad;
+  const mean = ((115.3654 + 13.0649929509 * days) % 360) * rad;
+  const eccentric = mean + .0549 * Math.sin(mean) * (1 + .0549 * Math.cos(mean));
+  const xv = 60.2666 * (Math.cos(eccentric) - .0549), yv = 60.2666 * Math.sqrt(1 - .0549 ** 2) * Math.sin(eccentric);
+  const trueAnomaly = Math.atan2(yv, xv), lunarRadius = Math.hypot(xv, yv);
+  const lunarLon = trueAnomaly + peri;
+  const lunarEcl = [lunarRadius * (Math.cos(node) * Math.cos(lunarLon) - Math.sin(node) * Math.sin(lunarLon) * Math.cos(5.1454 * rad)),
+    lunarRadius * (Math.sin(node) * Math.cos(lunarLon) + Math.cos(node) * Math.sin(lunarLon) * Math.cos(5.1454 * rad)),
+    lunarRadius * Math.sin(lunarLon) * Math.sin(5.1454 * rad)];
+  const obliquity = 23.4393 * rad;
+  const lunarEq = [lunarEcl[0], lunarEcl[1] * Math.cos(obliquity) - lunarEcl[2] * Math.sin(obliquity), lunarEcl[1] * Math.sin(obliquity) + lunarEcl[2] * Math.cos(obliquity)];
+  const jd = Date.now() / 86400000 + 2440587.5;
+  const gmst = ((280.46061837 + 360.98564736629 * (jd - 2451545)) % 360) * rad;
+  const moonLon = Math.atan2(lunarEq[1], lunarEq[0]) - gmst, moonLat = Math.atan2(lunarEq[2], Math.hypot(lunarEq[0], lunarEq[1]));
+  const moonWorld = [Math.cos(moonLat) * Math.cos(moonLon), Math.cos(moonLat) * Math.sin(moonLon), Math.sin(moonLat)];
 
   ctx.save();
   ctx.beginPath(); ctx.arc(cx, cy, earthR, 0, Math.PI * 2); ctx.clip();
@@ -1593,6 +1620,40 @@ function drawOrbitView(gps = orbitGps, satellites = orbitSatellites, sampleTrail
   });
   ctx.restore();
   ctx.beginPath(); ctx.arc(cx, cy, earthR, 0, Math.PI * 2); ctx.strokeStyle = '#347354'; ctx.lineWidth = 1.5; ctx.stroke();
+
+  const moonModel = [moonWorld[0] * east[0] + moonWorld[1] * east[1] + moonWorld[2] * east[2], moonWorld[0] * north[0] + moonWorld[1] * north[1] + moonWorld[2] * north[2], moonWorld[0] * forward[0] + moonWorld[1] * forward[1] + moonWorld[2] * forward[2]];
+  const moonProjected = project(moonModel.map(value => value * shellRadius(lunarRadius * 6371) / earthR));
+  const moonRadius = Math.max(6, earthR * .273);
+  ctx.save(); ctx.shadowColor = 'rgba(190, 220, 235, .65)'; ctx.shadowBlur = 9;
+  ctx.beginPath(); ctx.arc(moonProjected.x, moonProjected.y, moonRadius, 0, Math.PI * 2);
+  const moonSurface = ctx.createRadialGradient(moonProjected.x - moonRadius * .32, moonProjected.y - moonRadius * .38, moonRadius * .08, moonProjected.x, moonProjected.y, moonRadius);
+  moonSurface.addColorStop(0, '#e0e2dc'); moonSurface.addColorStop(.72, '#b8c0c0'); moonSurface.addColorStop(1, '#78868b');
+  ctx.fillStyle = moonSurface; ctx.fill(); ctx.shadowBlur = 0;
+  // Near-side lunar maria, placed approximately in selenographic coordinates.
+  ctx.save(); ctx.beginPath(); ctx.arc(moonProjected.x, moonProjected.y, moonRadius, 0, Math.PI * 2); ctx.clip();
+  const maria = [
+    [-.25,-.60,.28,.18,-.25], // Mare Imbrium
+    [.20,-.48,.18,.13,.25], // Mare Serenitatis
+    [.23,-.22,.19,.11,-.2], // Mare Tranquillitatis
+    [.67,-.17,.16,.22,.1], // Mare Crisium
+    [.40,.15,.24,.16,.28], // Mare Fecunditatis
+    [.20,.39,.13,.12,-.2], // Mare Nectaris
+    [-.28,.42,.33,.16,-.12], // Mare Nubium
+    [-.53,.28,.16,.11,.2], // Mare Humorum
+    [-.58,-.04,.31,.18,.18] // Oceanus Procellarum
+  ];
+  ctx.fillStyle = 'rgba(91, 103, 108, .43)';
+  maria.forEach(([x,y,rx,ry,angle]) => { ctx.beginPath(); ctx.ellipse(moonProjected.x + x * moonRadius, moonProjected.y + y * moonRadius, rx * moonRadius, ry * moonRadius, angle, 0, Math.PI * 2); ctx.fill(); });
+  ctx.strokeStyle = 'rgba(73, 86, 92, .42)'; ctx.lineWidth = Math.max(.7, moonRadius * .025);
+  maria.forEach(([x,y,rx,ry,angle]) => { ctx.beginPath(); ctx.ellipse(moonProjected.x + x * moonRadius, moonProjected.y + y * moonRadius, rx * moonRadius, ry * moonRadius, angle, 0, Math.PI * 2); ctx.stroke(); });
+  // Approximate phase shading from the Sun direction in the ecliptic plane.
+  const sunMean = ((280.460 + .9856474 * (jd - 2451545)) % 360) * rad;
+  const elongation = Math.atan2(Math.sin(lunarLon - sunMean), Math.cos(lunarLon - sunMean));
+  const phase = Math.cos(elongation);
+  ctx.fillStyle = 'rgba(12, 20, 25, .43)';
+  ctx.beginPath(); ctx.ellipse(moonProjected.x + Math.sign(phase || 1) * moonRadius * .42, moonProjected.y, moonRadius * (1 - Math.abs(phase)) + .02, moonRadius, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.restore();
+  ctx.font = '11px sans-serif'; ctx.fillStyle = 'rgba(210, 224, 229, .85)'; ctx.textAlign = 'center'; ctx.fillText(`Moon · ${(lunarRadius * 6371).toLocaleString()} km`, moonProjected.x, moonProjected.y - moonRadius - 7); ctx.restore();
 
   const receiverPoint = project([0, 0, 1]);
   if (hasFix) {
