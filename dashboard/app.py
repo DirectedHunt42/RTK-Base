@@ -1595,7 +1595,7 @@ function drawOrbitView(gps = orbitGps, satellites = orbitSatellites, sampleTrail
   ctx.beginPath(); ctx.arc(cx, cy, earthR, 0, Math.PI * 2); ctx.strokeStyle = '#347354'; ctx.lineWidth = 1.5; ctx.stroke();
 
   const receiverPoint = project([0, 0, 1]);
-  if (hasFix && receiverPoint.z > 0) {
+  if (hasFix) {
     if (baseStationOrbitIcon.complete && baseStationOrbitIcon.naturalWidth) {
       ctx.drawImage(baseStationOrbitIcon, receiverPoint.x - 16, receiverPoint.y - 16, 32, 32);
     }
@@ -1619,10 +1619,9 @@ function drawOrbitView(gps = orbitGps, satellites = orbitSatellites, sampleTrail
     const p = project(model);
     points.push({ ...p, model, sat, name, color: colors[name] || '#d3ddd7', altitude, az: Number(sat.azimuth), el: Number(sat.elevation), signal: sat.signal });
   });
-  orbitPoints = points.filter(point => {
-    const dx = (point.x - cx) / earthR, dy = (point.y - cy) / earthR;
-    return dx * dx + dy * dy > 1 || point.z >= Math.sqrt(Math.max(0, 1 - dx * dx - dy * dy));
-  });
+  // Show the constellation through the globe, while coastlines above remain
+  // limited to the front-facing hemisphere.
+  orbitPoints = points;
   const now = Date.now();
   if (sampleTrails) {
     points.forEach(point => {
