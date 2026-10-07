@@ -819,6 +819,8 @@ HTML = r"""
   .file-download-button img { width: 16px; height: 16px; }
   #file-dialog-message { color: var(--amber); font-size: 11px; min-height: 1.5em; margin-top: 8px; }
   #readme-dialog-backdrop .file-dialog { width: min(960px, 100%); max-height: min(90vh, 1000px); }
+  #license-dialog-backdrop .file-dialog { width: min(960px, 100%); max-height: min(90vh, 1000px); }
+  #license-content { white-space: pre-wrap; overflow-wrap: anywhere; }
   .readme-content {
     min-height: 0;
     overflow: auto;
@@ -897,6 +899,10 @@ HTML = r"""
         <button id="readme-button" class="dashboard-action update-button" type="button" aria-label="View README" onclick="openReadmeDialog()">
           <img src="{{ url_for('static', filename='readme.svg') }}" alt="" aria-hidden="true">
           <span>README</span>
+        </button>
+        <button id="license-button" class="dashboard-action update-button" type="button" aria-label="View licence" onclick="openLicenseDialog()">
+          <img src="{{ url_for('static', filename='license.svg') }}" alt="" aria-hidden="true">
+          <span>Licence</span>
         </button>
         <button id="update-button" class="dashboard-action update-button" type="button" aria-label="Update" onclick="updatePi()">
           <img src="{{ url_for('static', filename='update.svg') }}" alt="" aria-hidden="true">
@@ -1109,6 +1115,18 @@ HTML = r"""
       <p class="file-dialog-intro">Project setup, receiver configuration, dashboard, and troubleshooting.</p>
       <article id="readme-content" class="readme-content" aria-live="polite">Loading README...</article>
       <div id="readme-dialog-message" role="status" aria-live="polite"></div>
+    </section>
+  </div>
+
+  <div id="license-dialog-backdrop" class="file-dialog-backdrop" hidden onclick="handleLicenseDialogBackdrop(event)">
+    <section class="file-dialog license-dialog" role="dialog" aria-modal="true" aria-labelledby="license-dialog-title">
+      <div class="file-dialog-heading">
+        <h2 id="license-dialog-title">RTK-Base Licence</h2>
+        <button class="file-dialog-close" type="button" aria-label="Close licence" onclick="closeLicenseDialog()">×</button>
+      </div>
+      <p class="file-dialog-intro">Project licence and usage terms.</p>
+      <pre id="license-content" class="readme-content" aria-live="polite">Loading licence...</pre>
+      <div id="license-dialog-message" role="status" aria-live="polite"></div>
     </section>
   </div>
 
@@ -1899,6 +1917,27 @@ async function openReadmeDialog() {
   }
   document.querySelector('#readme-dialog-backdrop .file-dialog-close')?.focus();
 }
+async function openLicenseDialog() {
+  const backdrop = document.getElementById('license-dialog-backdrop');
+  const content = document.getElementById('license-content');
+  const message = document.getElementById('license-dialog-message');
+  const scrollbarWidth = window.innerWidth - document.documentElement.clientWidth;
+  const bodyPaddingRight = parseFloat(getComputedStyle(document.body).paddingRight) || 0;
+  document.body.style.paddingRight = `${bodyPaddingRight + scrollbarWidth}px`;
+  backdrop.hidden = false;
+  document.body.style.overflow = 'hidden';
+  content.textContent = 'Loading licence...'; message.textContent = '';
+  try {
+    const response = await fetch('/api/license', { cache: 'no-store' });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || 'Could not load licence');
+    content.textContent = result.content;
+  } catch (error) {
+    content.textContent = 'Licence is unavailable.';
+    message.textContent = error.message;
+  }
+  document.querySelector('#license-dialog-backdrop .file-dialog-close')?.focus();
+}
 function escapeReadmeHtml(value) {
   return String(value).replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]);
 }
@@ -1970,6 +2009,15 @@ function closeReadmeDialog() {
   document.body.style.overflow = '';
   document.body.style.paddingRight = '';
   document.getElementById('readme-button').focus();
+}
+function closeLicenseDialog() {
+  document.getElementById('license-dialog-backdrop').hidden = true;
+  document.body.style.overflow = '';
+  document.body.style.paddingRight = '';
+  document.getElementById('license-button').focus();
+}
+function handleLicenseDialogBackdrop(event) {
+  if (event.target.id === 'license-dialog-backdrop') closeLicenseDialog();
 }
 function handleReadmeDialogBackdrop(event) {
   if (event.target.id === 'readme-dialog-backdrop') closeReadmeDialog();
@@ -2047,6 +2095,7 @@ async function downloadFile(item, button) {
 document.addEventListener('keydown', event => {
   if (event.key === 'Escape' && !document.getElementById('file-dialog-backdrop').hidden) closeFileDialog();
   if (event.key === 'Escape' && !document.getElementById('readme-dialog-backdrop').hidden) closeReadmeDialog();
+  if (event.key === 'Escape' && !document.getElementById('license-dialog-backdrop').hidden) closeLicenseDialog();
 });
 function closeUpdateTerminal() {
   document.getElementById('update-terminal-screen').classList.remove('active');
@@ -2253,6 +2302,21 @@ def api_readme():
         content = readme_path.read_text(encoding="utf-8")
     except OSError:
         return jsonify({"error": "README file is unavailable on the configured repository"}), 404
+    response = jsonify({"content": content})
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+@app.route("/api/license")
+def api_license():
+    try:
+        repo_path = Path("/etc/rtk-base-update-repo").read_text(encoding="utf-8").strip()
+        license_path = Path(repo_path) / "LICENSE.txt"
+    except OSError:
+        license_path = Path(__file__).resolve().parent.parent / "LICENSE.txt"
+    try:
+        content = license_path.read_text(encoding="utf-8")
+    except OSError:
+        return jsonify({"error": "Licence file is unavailable on the configured repository"}), 404
     response = jsonify({"content": content})
     response.headers["Cache-Control"] = "no-store"
     return response
