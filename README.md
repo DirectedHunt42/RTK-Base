@@ -6,7 +6,7 @@
 
 <p align="center">A Raspberry Pi RTK base station with an RTCM correction stream and a live GNSS diagnostics dashboard.</p>
 
-<p align="center"><strong>Dashboard version 0.10.1</strong></p>
+<p align="center"><strong>Dashboard version 0.10.2</strong></p>
 
 ## What it does
 
@@ -98,6 +98,10 @@ satellite for its signal and sky details. The plotted positions and recent
 trails are approximate: GPSD supplies azimuth and elevation, while the view uses
 representative constellation orbit heights rather than each satellite's live
 ephemeris.
+
+The globe's continent outlines use [Natural Earth 1:110m Land](https://www.naturalearthdata.com/downloads/110m-physical-vectors/110m-land/)
+(public domain). Its background star positions and proper motions use
+[ESA Gaia Data Release 3](https://www.cosmos.esa.int/web/gaia/dr3) (ESA/Gaia/DPAC).
 
 The **Files** button provides selected logs and installed configuration files.
 The **README** button opens this guide in the dashboard. The **Update** button

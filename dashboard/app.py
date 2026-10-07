@@ -713,6 +713,7 @@ HTML = r"""
     color: var(--dim);
     font-size: 11px;
   }
+  .data-credits { margin-top: 4px; }
   footer a { color: var(--green); text-decoration: none; }
   footer a:hover { text-decoration: underline; }
   #clock { color: var(--amber); }
@@ -1085,6 +1086,10 @@ HTML = r"""
   <footer>
     <a href="https://github.com/DirectedHunt42/RTK-Base" target="_blank" rel="noopener noreferrer">RTK-Base</a>
     Dashboard v{{ version }} · Raspberry Pi · data refreshes automatically
+    <div class="data-credits">
+      Continent outlines: <a href="https://www.naturalearthdata.com/downloads/110m-physical-vectors/110m-land/" target="_blank" rel="noopener noreferrer">Natural Earth</a> (public domain)
+      · Star data: <a href="https://www.cosmos.esa.int/web/gaia/dr3" target="_blank" rel="noopener noreferrer">ESA Gaia DR3 / DPAC</a>
+    </div>
   </footer>
 
   <section id="update-terminal-screen" role="dialog" aria-modal="true" aria-labelledby="update-terminal-title">
