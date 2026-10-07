@@ -527,8 +527,8 @@ HTML = r"""
   #orbit-view { display: block; width: 100%; height: 100%; min-height: 390px; cursor: grab; touch-action: none; }
   #orbit-view.dragging { cursor: grabbing; }
   #orbit-legend { display: grid; align-content: center; gap: 8px; border-left: 1px solid var(--border); padding-left: 14px; }
-  .orbit-legend-item { display: grid; grid-template-columns: 30px 1fr; align-items: center; gap: 8px; color: var(--text); font-size: 11px; }
-  .orbit-legend-item img { width: 28px; height: 28px; }
+  .orbit-legend-item { display: grid; grid-template-columns: 56px 1fr; align-items: center; gap: 8px; color: var(--text); font-size: 11px; }
+  .orbit-legend-item img { width: 56px; height: 56px; }
   .orbit-legend-item small { display: block; color: var(--dim); font-size: 10px; margin-top: 2px; }
   #orbit-tooltip {
     display: none;
@@ -558,8 +558,8 @@ HTML = r"""
     .orbit-content { grid-template-columns: 1fr; grid-template-rows: minmax(300px, 1fr) auto; }
     #orbit-view { min-height: 300px; }
     #orbit-legend { grid-template-columns: repeat(4, minmax(0, 1fr)); border-left: 0; border-top: 1px solid var(--border); padding: 10px 0 0; gap: 7px; }
-    .orbit-legend-item { grid-template-columns: 22px 1fr; gap: 5px; font-size: 10px; }
-    .orbit-legend-item img { width: 21px; height: 21px; }
+    .orbit-legend-item { grid-template-columns: 42px 1fr; gap: 5px; font-size: 10px; }
+    .orbit-legend-item img { width: 42px; height: 42px; }
     .orbit-legend-item small { font-size: 9px; }
   }
   @media (max-width: 600px) { #orbit-card { min-height: 660px; } .orbit-content { grid-template-rows: minmax(280px, 1fr) auto; } #orbit-view { min-height: 280px; } #orbit-legend { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
@@ -672,6 +672,7 @@ HTML = r"""
     border-radius: 6px;
     z-index: 0;
   }
+  #gps-map .leaflet-tile { filter: invert(100%) hue-rotate(180deg) brightness(.78) contrast(.9) saturate(.65); }
   .map-note { color: var(--dim); font-size: 11px; margin-top: 8px; }
   .satellite-graphics { display: flex; justify-content: center; align-items: center; min-height: 0; margin-top: -6px; padding: 0 0 4px; }
   #satellite-sky { display: block; width: min(100%, 320px); height: auto; }
@@ -1154,6 +1155,9 @@ const ORBIT_ICON_URLS = {
 const orbitIcons = Object.fromEntries(Object.entries(ORBIT_ICON_URLS).map(([name, url]) => {
   const image = new Image(); image.onload = () => drawOrbitView(); image.src = url; return [name, image];
 }));
+const baseStationOrbitIcon = new Image();
+baseStationOrbitIcon.onload = () => drawOrbitView();
+baseStationOrbitIcon.src = "{{ url_for('static', filename='base-station.svg') }}";
 const orbitLegendDetails = { GPS: 'GPS · MEO', Galileo: 'Galileo · MEO', GLONASS: 'GLONASS · MEO', BeiDou: 'BeiDou · MEO*', QZSS: 'QZSS · IGSO/GEO', SBAS: 'SBAS · GEO', NavIC: 'NavIC · GEO/IGSO', IMES: 'IMES · varies' };
 function initializeOrbitLegend() {
   const legend = document.getElementById('orbit-legend');
@@ -1285,6 +1289,7 @@ function initializeMap() {
   gpsMap = L.map('gps-map', { scrollWheelZoom: false }).setView([0, 0], 2);
   L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
     maxZoom: 19,
+    className: 'dark-map-tiles',
     attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
   }).addTo(gpsMap);
   window.setTimeout(() => gpsMap.invalidateSize(), 100);
@@ -1302,9 +1307,13 @@ function updateGpsMap(gps) {
   }
   const position = L.latLng(lat, lon);
   if (!gpsMarker) {
-    gpsMarker = L.circleMarker(position, {
-      radius: 8, color: '#00ff9f', weight: 2, fillColor: '#00ff9f', fillOpacity: 0.7
-    }).addTo(gpsMap).bindTooltip('RTK-Base receiver');
+    const baseStationIcon = L.icon({
+      iconUrl: "{{ url_for('static', filename='base-station.svg') }}",
+      iconSize: [40, 40], iconAnchor: [20, 20],
+      tooltipAnchor: [0, -20],
+      className: 'base-station-map-icon'
+    });
+    gpsMarker = L.marker(position, { icon: baseStationIcon }).addTo(gpsMap);
   } else {
     gpsMarker.setLatLng(position);
   }
@@ -1559,17 +1568,39 @@ function drawOrbitView(gps = orbitGps, satellites = orbitSatellites, sampleTrail
     [[-85,22],[-82,23],[-79,22],[-77,20],[-75,20],[-73,21],[-76,23],[-80,23],[-83,22],[-85,22]], // Cuba
     [[166,-34],[174,-37],[178,-41],[176,-44],[171,-46],[168,-43],[166,-40],[166,-34]] // New Zealand
   ];
-  ctx.strokeStyle = 'rgba(119, 190, 148, .72)'; ctx.lineWidth = 1.2; ctx.setLineDash([]);
+  ctx.strokeStyle = 'rgba(119, 190, 148, .78)'; ctx.lineWidth = 1.4; ctx.setLineDash([]);
   continentOutlines.forEach(outline => {
     ctx.beginPath();
     let started = false;
-    outline.forEach(([lonDeg, latDeg]) => {
+    const projectCoastPoint = (lonDeg, latDeg) => {
       const a = latDeg * Math.PI / 180, b = lonDeg * Math.PI / 180;
       const v = [Math.cos(a) * Math.cos(b), Math.cos(a) * Math.sin(b), Math.sin(a)];
-      const p = project([v[0] * east[0] + v[1] * east[1] + v[2] * east[2], v[0] * north[0] + v[1] * north[1] + v[2] * north[2], v[0] * forward[0] + v[1] * forward[1] + v[2] * forward[2]]);
-      if (p.z < 0) { started = false; return; }
-      if (!started) { ctx.moveTo(p.x, p.y); started = true; } else ctx.lineTo(p.x, p.y);
-    });
+      return project([v[0] * east[0] + v[1] * east[1] + v[2] * east[2], v[0] * north[0] + v[1] * north[1] + v[2] * north[2], v[0] * forward[0] + v[1] * forward[1] + v[2] * forward[2]]);
+    };
+    for (let index = 1; index < outline.length; index += 1) {
+      const [lonA, latA] = outline[index - 1], [lonB, latB] = outline[index];
+      const steps = Math.max(1, Math.ceil(Math.max(Math.abs(lonB - lonA), Math.abs(latB - latA)) / 2));
+      let previous = null;
+      for (let step = 0; step <= steps; step += 1) {
+        const t = step / steps;
+        const lon = lonA + (lonB - lonA) * t, lat = latA + (latB - latA) * t;
+        const p = projectCoastPoint(lon, lat);
+        if (previous && (previous.p.z >= 0) !== (p.z >= 0)) {
+          let low = previous.t, high = t;
+          for (let iteration = 0; iteration < 12; iteration += 1) {
+            const middle = (low + high) / 2;
+            const probe = projectCoastPoint(lonA + (lonB - lonA) * middle, latA + (latB - latA) * middle);
+            if ((probe.z >= 0) === (previous.p.z >= 0)) low = middle; else high = middle;
+          }
+          const edge = projectCoastPoint(lonA + (lonB - lonA) * ((low + high) / 2), latA + (latB - latA) * ((low + high) / 2));
+          if (previous.p.z >= 0) { if (started) ctx.lineTo(edge.x, edge.y); started = false; }
+          else { ctx.moveTo(edge.x, edge.y); started = true; }
+        }
+        if (p.z < 0) { started = false; previous = { t, p }; continue; }
+        if (!started) { ctx.moveTo(p.x, p.y); started = true; } else ctx.lineTo(p.x, p.y);
+        previous = { t, p };
+      }
+    }
     ctx.stroke();
   });
   ctx.restore();
@@ -1577,9 +1608,9 @@ function drawOrbitView(gps = orbitGps, satellites = orbitSatellites, sampleTrail
 
   const receiverPoint = project([0, 0, 1]);
   if (hasFix && receiverPoint.z > 0) {
-    ctx.beginPath(); ctx.arc(receiverPoint.x, receiverPoint.y, 4, 0, Math.PI * 2); ctx.fillStyle = '#fff'; ctx.fill();
-    ctx.beginPath(); ctx.arc(receiverPoint.x, receiverPoint.y, 8, 0, Math.PI * 2); ctx.strokeStyle = '#00ff9f'; ctx.lineWidth = 1.5; ctx.stroke();
-    ctx.fillStyle = '#d7e8de'; ctx.font = '11px JetBrains Mono, monospace'; ctx.fillText('RECEIVER', receiverPoint.x + 12, receiverPoint.y - 9);
+    if (baseStationOrbitIcon.complete && baseStationOrbitIcon.naturalWidth) {
+      ctx.drawImage(baseStationOrbitIcon, receiverPoint.x - 16, receiverPoint.y - 16, 32, 32);
+    }
   }
   const points = [];
   positioned.forEach(sat => {
@@ -1633,7 +1664,7 @@ function drawOrbitView(gps = orbitGps, satellites = orbitSatellites, sampleTrail
     const receiver = project([0, 0, 1]);
     ctx.beginPath(); ctx.moveTo(receiver.x, receiver.y); ctx.lineTo(x, y); ctx.strokeStyle = color; ctx.globalAlpha = .22; ctx.lineWidth = 1; ctx.stroke(); ctx.globalAlpha = 1;
     const icon = orbitIcons[point.name];
-    if (icon?.complete && icon.naturalWidth) ctx.drawImage(icon, x - 10, y - 10, 20, 20);
+    if (icon?.complete && icon.naturalWidth) ctx.drawImage(icon, x - 20, y - 20, 40, 40);
     else { ctx.beginPath(); ctx.arc(x, y, 6, 0, Math.PI * 2); ctx.fillStyle = color; ctx.fill(); }
   });
   ctx.textAlign = 'left';
