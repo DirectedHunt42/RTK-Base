@@ -446,7 +446,7 @@ HTML = r"""
   header {
     margin-bottom: 28px;
     position: relative;
-    padding-right: 320px;
+    padding-right: 400px;
   }
   .header-actions {
     position: absolute;
@@ -481,6 +481,10 @@ HTML = r"""
     .header-actions { left: 0; right: auto; }
     #action-message { text-align: left; }
     h1 { font-size: 1.25rem; }
+  }
+  @media (max-width: 600px) {
+    .dashboard-action { padding: 7px 9px; }
+    .dashboard-action span { display: none; }
   }
   h1 {
     color: var(--green);
@@ -814,6 +818,34 @@ HTML = r"""
   .file-download-button:disabled { cursor: wait; opacity: 0.55; }
   .file-download-button img { width: 16px; height: 16px; }
   #file-dialog-message { color: var(--amber); font-size: 11px; min-height: 1.5em; margin-top: 8px; }
+  #readme-dialog-backdrop .file-dialog { width: min(960px, 100%); max-height: min(90vh, 1000px); }
+  .readme-content {
+    min-height: 0;
+    overflow: auto;
+    padding: 16px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: #080c0a;
+    color: #c8e6d5;
+    font: 12px/1.65 'JetBrains Mono', monospace;
+  }
+  .readme-content h1, .readme-content h2, .readme-content h3 { color: var(--green); margin: 22px 0 9px; }
+  .readme-content h1 { font-size: 1.5rem; }
+  .readme-content h2 { font-size: 1.15rem; border-bottom: 1px solid var(--border); padding-bottom: 5px; }
+  .readme-content h3 { color: var(--amber); font-size: 1rem; }
+  .readme-content p { margin: 10px 0; }
+  .readme-content ul, .readme-content ol { margin: 8px 0 12px 24px; }
+  .readme-content li { margin: 4px 0; }
+  .readme-content a { color: var(--green); }
+  .readme-content code { color: #baffdc; background: #111a15; border-radius: 3px; padding: 1px 4px; }
+  .readme-content pre { overflow: auto; padding: 12px; margin: 10px 0 15px; border: 1px solid var(--border); border-radius: 5px; background: #050807; }
+  .readme-content pre code { padding: 0; background: transparent; }
+  .readme-content table { width: 100%; border-collapse: collapse; margin: 12px 0; }
+  .readme-content th, .readme-content td { text-align: left; vertical-align: top; border: 1px solid var(--border); padding: 6px 8px; }
+  .readme-content th { color: var(--amber); background: #111; }
+  .readme-center { text-align: center; }
+  .readme-center img { object-fit: contain; }
+  .readme-content img { max-width: 100%; height: auto; }
   @media (max-width: 600px) {
     .file-dialog-backdrop { padding: 10px; }
     .file-dialog { max-height: 92vh; padding: 14px; }
@@ -858,15 +890,19 @@ HTML = r"""
     <h1>RTK-BASE // DIAGNOSTICS</h1>
     <div class="header-actions">
       <div class="header-action-buttons">
-        <button id="files-button" class="dashboard-action update-button" type="button" onclick="openFileDialog()">
+        <button id="files-button" class="dashboard-action update-button" type="button" aria-label="Files" onclick="openFileDialog()">
           <img src="{{ url_for('static', filename='files-config.svg') }}" alt="" aria-hidden="true">
           <span>Files</span>
         </button>
-        <button id="update-button" class="dashboard-action update-button" type="button" onclick="updatePi()">
+        <button id="readme-button" class="dashboard-action update-button" type="button" aria-label="View README" onclick="openReadmeDialog()">
+          <img src="{{ url_for('static', filename='readme.svg') }}" alt="" aria-hidden="true">
+          <span>README</span>
+        </button>
+        <button id="update-button" class="dashboard-action update-button" type="button" aria-label="Update" onclick="updatePi()">
           <img src="{{ url_for('static', filename='update.svg') }}" alt="" aria-hidden="true">
           <span>Update</span>
         </button>
-        <button id="reboot-button" class="dashboard-action reboot-button" type="button" onclick="rebootPi()">
+        <button id="reboot-button" class="dashboard-action reboot-button" type="button" aria-label="Reboot Pi" onclick="rebootPi()">
           <img src="{{ url_for('static', filename='reboot.svg') }}" alt="" aria-hidden="true">
           <span>Reboot Pi</span>
         </button>
@@ -1034,7 +1070,7 @@ HTML = r"""
       <div id="orbit-tooltip" role="status" aria-live="polite"></div>
       <div class="orbit-foot">
         <div id="orbit-key" class="orbit-key"></div>
-        <span>Drag to rotate · hover a satellite for details · positions and orbit tracks are approximate.</span>
+        <span>Drag to rotate · scroll to zoom · hover a satellite for details · positions are approximate.</span>
       </div>
     </section>
   </div>
@@ -1064,6 +1100,18 @@ HTML = r"""
     </section>
   </div>
 
+  <div id="readme-dialog-backdrop" class="file-dialog-backdrop" hidden onclick="handleReadmeDialogBackdrop(event)">
+    <section class="file-dialog" role="dialog" aria-modal="true" aria-labelledby="readme-dialog-title">
+      <div class="file-dialog-heading">
+        <h2 id="readme-dialog-title">RTK-Base README</h2>
+        <button class="file-dialog-close" type="button" aria-label="Close README" onclick="closeReadmeDialog()">×</button>
+      </div>
+      <p class="file-dialog-intro">Project setup, receiver configuration, dashboard, and troubleshooting.</p>
+      <article id="readme-content" class="readme-content" aria-live="polite">Loading README...</article>
+      <div id="readme-dialog-message" role="status" aria-live="polite"></div>
+    </section>
+  </div>
+
 <script>
 let gpsMap = null;
 let gpsMarker = null;
@@ -1071,7 +1119,9 @@ let mapHasFix = false;
 let orbitGps = { latitude: null, longitude: null };
 let orbitSatellites = [];
 let orbitRotation = { yaw: 0, pitch: 0 };
+let orbitZoom = 1;
 let orbitPoints = [];
+const orbitTrailHistory = new Map();
 let orbitDrag = null;
 const ORBIT_ICON_URLS = {
   GPS: "{{ url_for('static', filename='satellite-gps.svg') }}",
@@ -1385,7 +1435,7 @@ function updateSatelliteGraphics(satellites) {
   });
 }
 
-function drawOrbitView(gps = orbitGps, satellites = orbitSatellites) {
+function drawOrbitView(gps = orbitGps, satellites = orbitSatellites, sampleTrails = false) {
   const canvas = document.getElementById('orbit-view');
   const ctx = canvas.getContext('2d');
   const bounds = canvas.getBoundingClientRect();
@@ -1397,7 +1447,7 @@ function drawOrbitView(gps = orbitGps, satellites = orbitSatellites) {
   const w = bounds.width, h = bounds.height;
   ctx.clearRect(0, 0, w, h);
   const cx = w / 2, cy = h / 2 + 3;
-  const earthR = Math.max(82, Math.min(h * .31, w * .16, 175));
+  const earthR = Math.max(82, Math.min(h * .31, w * .16, 175)) * orbitZoom;
   const lat = Number(gps.latitude), lon = Number(gps.longitude);
   const hasFix = Number.isFinite(lat) && Number.isFinite(lon);
   const latR = (hasFix ? lat : 0) * Math.PI / 180;
@@ -1516,12 +1566,37 @@ function drawOrbitView(gps = orbitGps, satellites = orbitSatellites) {
     const actual = [forward[0] * r0 + ray[0] * distance, forward[1] * r0 + ray[1] * distance, forward[2] * r0 + ray[2] * distance];
     const actualR = Math.hypot(...actual), shownR = shellRadius(altitude) / earthR;
     const scaled = actual.map(v => v * shownR / actualR);
-    const p = project([scaled[0] * east[0] + scaled[1] * east[1] + scaled[2] * east[2], scaled[0] * north[0] + scaled[1] * north[1] + scaled[2] * north[2], scaled[0] * forward[0] + scaled[1] * forward[1] + scaled[2] * forward[2]]);
-    points.push({ ...p, sat, name, color: colors[name] || '#d3ddd7', altitude, az: Number(sat.azimuth), el: Number(sat.elevation), signal: sat.signal });
+    const model = [scaled[0] * east[0] + scaled[1] * east[1] + scaled[2] * east[2], scaled[0] * north[0] + scaled[1] * north[1] + scaled[2] * north[2], scaled[0] * forward[0] + scaled[1] * forward[1] + scaled[2] * forward[2]];
+    const p = project(model);
+    points.push({ ...p, model, sat, name, color: colors[name] || '#d3ddd7', altitude, az: Number(sat.azimuth), el: Number(sat.elevation), signal: sat.signal });
   });
   orbitPoints = points.filter(point => {
     const dx = (point.x - cx) / earthR, dy = (point.y - cy) / earthR;
     return dx * dx + dy * dy > 1 || point.z >= Math.sqrt(Math.max(0, 1 - dx * dx - dy * dy));
+  });
+  const now = Date.now();
+  if (sampleTrails) {
+    points.forEach(point => {
+      const history = orbitTrailHistory.get(point.sat.id) || [];
+      history.push({ model: point.model, time: now });
+      while (history.length && (history.length > 48 || now - history[0].time > 192000)) history.shift();
+      orbitTrailHistory.set(point.sat.id, history);
+    });
+  }
+  orbitPoints.forEach(point => {
+    const history = orbitTrailHistory.get(point.sat.id) || [];
+    if (history.length < 2) return;
+    for (let index = 1; index < history.length; index += 1) {
+      const from = project(history[index - 1].model), to = project(history[index].model);
+      const visible = p => {
+        const dx = (p.x - cx) / earthR, dy = (p.y - cy) / earthR;
+        return dx * dx + dy * dy > 1 || p.z >= Math.sqrt(Math.max(0, 1 - dx * dx - dy * dy));
+      };
+      if (!visible(from) || !visible(to)) continue;
+      ctx.beginPath(); ctx.moveTo(from.x, from.y); ctx.lineTo(to.x, to.y);
+      ctx.strokeStyle = point.color; ctx.globalAlpha = .08 + .24 * index / (history.length - 1); ctx.lineWidth = 1.5; ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
   });
   orbitPoints.sort((a, b) => a.z - b.z).forEach(point => {
     const { x, y, color } = point;
@@ -1589,6 +1664,11 @@ function stopOrbitDrag() { orbitDrag = null; orbitCanvas.classList.remove('dragg
 orbitCanvas.addEventListener('pointerup', stopOrbitDrag);
 orbitCanvas.addEventListener('pointercancel', stopOrbitDrag);
 orbitCanvas.addEventListener('pointerleave', () => { if (!orbitDrag) orbitTooltip.style.display = 'none'; });
+orbitCanvas.addEventListener('wheel', event => {
+  event.preventDefault();
+  orbitZoom = Math.max(.65, Math.min(2.2, orbitZoom * Math.exp(-event.deltaY * .001)));
+  drawOrbitView();
+}, { passive: false });
 
 async function refresh() {
   try {
@@ -1658,7 +1738,7 @@ async function refresh() {
     updateSatelliteGraphics(d.gps.satellite_data);
     orbitGps = d.gps;
     orbitSatellites = d.gps.satellite_data || [];
-    drawOrbitView();
+    drawOrbitView(orbitGps, orbitSatellites, true);
     document.getElementById('active-mode').textContent = d.mode === 'telemetry' ? 'GPS telemetry' : d.mode === 'corrections' ? 'RTCM corrections' : 'Stopped';
     document.getElementById('corrections-mode').classList.toggle('active', d.mode === 'corrections');
     document.getElementById('telemetry-mode').classList.toggle('active', d.mode === 'telemetry');
@@ -1786,6 +1866,95 @@ function closeFileDialog() {
   document.body.style.paddingRight = '';
   document.getElementById('files-button').focus();
 }
+async function openReadmeDialog() {
+  const backdrop = document.getElementById('readme-dialog-backdrop');
+  const content = document.getElementById('readme-content');
+  const message = document.getElementById('readme-dialog-message');
+  backdrop.hidden = false;
+  document.body.style.overflow = 'hidden';
+  content.textContent = 'Loading README...'; message.textContent = '';
+  try {
+    const response = await fetch('/api/readme', { cache: 'no-store' });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || 'Could not load README');
+    renderReadme(result.content, content);
+  } catch (error) {
+    content.textContent = 'README is unavailable.';
+    message.textContent = error.message;
+  }
+  document.querySelector('#readme-dialog-backdrop .file-dialog-close')?.focus();
+}
+function escapeReadmeHtml(value) {
+  return String(value).replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]);
+}
+function readmeInline(value) {
+  let html = escapeReadmeHtml(value);
+  html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+  html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+  html = html.replace(/\*([^*]+)\*/g, '<em>$1</em>');
+  html = html.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+|#[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+  return html;
+}
+function renderReadme(markdown, target) {
+  const lines = String(markdown).split(/\r?\n/);
+  const blocks = [];
+  const isTableDivider = line => /^\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?$/.test(line.trim());
+  const cells = line => line.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map(cell => cell.trim());
+  let index = 0;
+  while (index < lines.length) {
+    const line = lines[index].trim();
+    if (!line) { index += 1; continue; }
+    if (line === '<p align="center">') { blocks.push('<div class="readme-center">'); index += 1; continue; }
+    if (line === '</p>') { blocks.push('</div>'); index += 1; continue; }
+    const image = line.match(/^<img src="(dashboard\/static\/[\w.-]+\.svg)" alt="([^"]*)" width="(\d+)" height="(\d+)">$/);
+    if (image) { blocks.push(`<img src="/static/${image[1].replace('dashboard/static/', '')}" alt="${escapeReadmeHtml(image[2])}" width="${image[3]}" height="${image[4]}">`); index += 1; continue; }
+    const centeredHeading = line.match(/^<h1 align="center">(.*?)<\/h1>$/);
+    if (centeredHeading) { blocks.push(`<h1 class="readme-center">${escapeReadmeHtml(centeredHeading[1])}</h1>`); index += 1; continue; }
+    const centeredParagraph = line.match(/^<p align="center"><strong>(.*?)<\/strong><\/p>$/);
+    if (centeredParagraph) { blocks.push(`<p class="readme-center"><strong>${escapeReadmeHtml(centeredParagraph[1])}</strong></p>`); index += 1; continue; }
+    const fence = line.match(/^```(.*)$/);
+    if (fence) {
+      const code = []; index += 1;
+      while (index < lines.length && !/^\s*```/.test(lines[index])) code.push(lines[index++]);
+      index += 1;
+      blocks.push(`<pre><code>${escapeReadmeHtml(code.join('\n'))}</code></pre>`); continue;
+    }
+    const heading = line.match(/^(#{1,3})\s+(.+)$/);
+    if (heading) { const level = heading[1].length; blocks.push(`<h${level}>${readmeInline(heading[2])}</h${level}>`); index += 1; continue; }
+    if (line.startsWith('|') && index + 1 < lines.length && isTableDivider(lines[index + 1])) {
+      const header = cells(line); index += 2;
+      const rows = [];
+      while (index < lines.length && lines[index].trim().startsWith('|')) rows.push(cells(lines[index++]));
+      blocks.push(`<table><thead><tr>${header.map(cell => `<th>${readmeInline(cell)}</th>`).join('')}</tr></thead><tbody>${rows.map(row => `<tr>${row.map(cell => `<td>${readmeInline(cell)}</td>`).join('')}</tr>`).join('')}</tbody></table>`);
+      continue;
+    }
+    const listMatch = line.match(/^(?:[-*]|\d+\.)\s+(.+)$/);
+    if (listMatch) {
+      const ordered = /^\d+\./.test(line), tag = ordered ? 'ol' : 'ul', items = [];
+      while (index < lines.length) {
+        const item = lines[index].trim().match(/^(?:[-*]|\d+\.)\s+(.+)$/);
+        if (!item || (/^\d+\./.test(lines[index].trim())) !== ordered) break;
+        const itemLines = [item[1]]; index += 1;
+        while (index < lines.length && /^\s{2,}\S/.test(lines[index])) itemLines.push(lines[index++].trim());
+        items.push(`<li>${readmeInline(itemLines.join(' '))}</li>`);
+      }
+      blocks.push(`<${tag}>${items.join('')}</${tag}>`); continue;
+    }
+    const paragraph = [line]; index += 1;
+    while (index < lines.length && lines[index].trim() && !/^(#{1,3}\s|```|\||[-*]\s|\d+\.\s|<p align=|<h1 align=|<img )/.test(lines[index].trim())) paragraph.push(lines[index++].trim());
+    blocks.push(`<p>${readmeInline(paragraph.join(' '))}</p>`);
+  }
+  target.innerHTML = blocks.join('\n');
+}
+function closeReadmeDialog() {
+  document.getElementById('readme-dialog-backdrop').hidden = true;
+  document.body.style.overflow = '';
+  document.body.style.paddingRight = '';
+  document.getElementById('readme-button').focus();
+}
+function handleReadmeDialogBackdrop(event) {
+  if (event.target.id === 'readme-dialog-backdrop') closeReadmeDialog();
+}
 function handleFileDialogBackdrop(event) {
   if (event.target.id === 'file-dialog-backdrop') closeFileDialog();
 }
@@ -1858,6 +2027,7 @@ async function downloadFile(item, button) {
 }
 document.addEventListener('keydown', event => {
   if (event.key === 'Escape' && !document.getElementById('file-dialog-backdrop').hidden) closeFileDialog();
+  if (event.key === 'Escape' && !document.getElementById('readme-dialog-backdrop').hidden) closeReadmeDialog();
 });
 function closeUpdateTerminal() {
   document.getElementById('update-terminal-screen').classList.remove('active');
@@ -2052,6 +2222,21 @@ def api_update_output():
 @app.route("/api/downloads")
 def api_downloads():
     return jsonify({"files": DOWNLOAD_ITEMS})
+
+@app.route("/api/readme")
+def api_readme():
+    try:
+        repo_path = Path("/etc/rtk-base-update-repo").read_text(encoding="utf-8").strip()
+        readme_path = Path(repo_path) / "README.md"
+    except OSError:
+        readme_path = Path(__file__).resolve().parent.parent / "README.md"
+    try:
+        content = readme_path.read_text(encoding="utf-8")
+    except OSError:
+        return jsonify({"error": "README file is unavailable on the configured repository"}), 404
+    response = jsonify({"content": content})
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 @app.route("/api/downloads/<file_id>")
 def api_download_file(file_id: str):

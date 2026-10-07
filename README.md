@@ -4,32 +4,38 @@
 
 <h1 align="center">RTK-Base</h1>
 
-DIY RTK base station for a Raspberry Pi and u-blox GNSS receiver. The Pi reads
-the receiver and serves RTCM corrections over TCP for clients such as Mission
-Planner.
+<p align="center">A Raspberry Pi RTK base station with an RTCM correction stream and a live GNSS diagnostics dashboard.</p>
 
-## Features
+<p align="center"><strong>Dashboard version 0.9.5</strong></p>
 
-- Streams RTCM 3 over TCP, preferring port **2101** and finding a free nearby
-  port when needed
-- Starts the RTCM stream and diagnostics dashboard at boot
-- Live system and network diagnostics, plus switchable GPS telemetry
-- Wi-Fi link strength and network traffic counters
-- Collapsible dashboard panels
-- Dashboard available on the standard HTTP port
-- Dashboard update control with a live terminal view for the updater and setup output
-- Dashboard downloads for RTK-Base logs and installed configuration files
-- Repository file tree with mappings to installed updater and service files
-- Satellite sky view, signal strengths, and receiver position map in telemetry mode
+## What it does
 
-Dashboard version: **0.9.3** (`dashboard/VERSION`)
+RTK-Base connects a u-blox GNSS receiver to a Raspberry Pi and forwards the
+receiver's RTCM 3 corrections to clients over TCP. The dashboard reports the
+Pi, network, stream, receiver, and satellite status.
+
+- Streams RTCM 3 over TCP, preferring port **2101** and selecting a free port
+  from **2102–2120** if 2101 is already occupied
+- Starts the stream and dashboard services at boot
+- Switches the receiver between correction streaming and GPS telemetry
+- Shows receiver position, fix, altitude, DOP, signal strengths, and satellites
+- Includes a receiver map, sky plot, and an interactive approximate 3D GNSS view
+- Provides system and network diagnostics, logs, configuration downloads, and
+  a repository file tree
 
 ## Hardware
 
-- Raspberry Pi with Raspberry Pi OS
-- u-blox GNSS receiver (such as F9P or M8P) connected by USB
+- Raspberry Pi running Raspberry Pi OS
+- u-blox GNSS receiver, such as a ZED-F9P or NEO-M8P
+- GNSS antenna with a clear view of the sky
+- USB connection between the receiver and Raspberry Pi
+
+The receiver must be configured to output RTCM 3 messages for base operation.
+Setup installs the Pi software but does not configure the receiver itself.
 
 ## Install
+
+Clone the repository on the Pi and run the setup script:
 
 ```bash
 git clone https://github.com/DirectedHunt42/RTK-Base.git
@@ -38,123 +44,103 @@ chmod +x setup.sh
 sudo ./setup.sh
 ```
 
-After setup, open `http://<pi-ip>` in a browser. For example, if the Pi's
-address is `192.168.0.41`, visit `http://192.168.0.41`.
-Connect the GNSS receiver before running setup; the installer detects its
-`/dev/serial/by-id` device and installs RTKLIB (`str2str`), GPSD, Flask, nginx,
-and the system services automatically. If port 2101 is occupied, the stream
-service tries ports 2102 through 2120 each time it starts.
+Connect the receiver before setup so the installer can find its
+`/dev/serial/by-id` device. Setup installs RTKLIB (`str2str`), GPSD, Flask,
+nginx, and the RTK-Base services. When setup finishes, open
+`http://<pi-ip>` in a browser.
 
-Use the dashboard's **Update** button to pull the latest repository version
-and rerun setup. Updating runs `git reset --hard` first, so tracked local
-changes in the checkout are discarded. Update progress and errors appear in
-the dashboard; detailed output is logged to `/var/log/rtk-base-update.log`.
+## Connect a client
 
-Setup checks that it can find the receiver device and that RTKLIB's `str2str`
-executable was installed. It enables and starts the services, then prints their
-status and the selected port. These checks confirm the Pi software is present
-and running; they do not confirm that the receiver is tracking satellites or
-that its output contains valid corrections.
+In Mission Planner, open **Setup → Optional Hardware → RTK/GPS Inject**, select
+**TCP Client**, and enter the Pi's IP address and active RTCM port. Leave both
+NTRIP options unchecked.
 
-## Connections
+Port 2101 is preferred. If it is busy, RTK-Base selects the first available
+port between 2102 and 2120. The active port appears in the dashboard's System
+panel and in setup's completion message. Configure the client to use that port.
 
-| Service | Address | Purpose |
-| --- | --- | --- |
-| RTCM stream | `tcp://<pi-ip>:<rtcm-port>` | Correction data for Mission Planner |
-| Dashboard | `http://<pi-ip>` (port 80) | Live diagnostics |
+## Receiver setup
 
-In Mission Planner, open **Setup → Optional Hardware → RTK/GPS Inject** and
-select **TCP Client**. Enter the Pi's IP address and actual RTCM port. Port
-2101 is preferred; if it is occupied, the service selects the first free port
-from 2102 through 2120. The active port appears in the dashboard System panel
-and in setup's completion message. Leave both NTRIP options unchecked.
+For an RTK base, configure the receiver to use a surveyed or fixed base position
+and output RTCM 3 over its USB/serial connection. Include observation messages
+(for example, GPS MSM) and a reference position message such as RTCM 1005.
+Keep the antenna stationary during survey-in.
 
-## GPS and stream modes
+Receiver configuration differs by model. The
+[CubePilot HERE 3 manual](https://github.com/CubePilot/cubepilot-docs/blob/master/here-3/here-3-manual.md)
+describes its base survey and RTCM status workflow.
 
-The dashboard starts in **RTCM corrections** mode. Use the controls in the
-GNSS / GPS card to switch between:
+## Operating modes
 
-- **RTCM corrections**: `str2str` owns the receiver port and serves data on
-  the selected RTCM TCP port.
-- **GPS telemetry**: GPSD owns the receiver port and the dashboard displays
-  fix type, position, altitude, speed, and satellites used/visible.
+The **GNSS / GPS** panel switches between two exclusive modes because the
+receiver has one configured serial connection:
 
-The receiver exposes one configured serial port, so these modes are exclusive.
-RTCM corrections pause while GPS telemetry is selected. Switching back restarts
-the RTCM stream. Setup installs RTKLIB's `str2str`, detects the connected
-receiver, configures both services, and grants the
-dashboard permission to switch only between these two modes. The system GPSD
-socket service is disabled so it cannot claim the receiver port independently.
-Anyone with access to the dashboard can change the active mode.
+- **RTCM corrections**: `str2str` owns the receiver and serves corrections to
+  connected clients.
+- **GPS telemetry**: GPSD owns the receiver and provides fix, position, and
+  satellite data to the dashboard. The RTCM stream pauses in this mode.
 
-In corrections mode, `str2str` forwards the receiver's RTCM 3 stream unchanged
-over TCP. Configure the receiver as an RTK base and make sure its serial/USB
-connection outputs RTCM 3 messages, including observation messages and a valid
-reference-position message such as RTCM 1005. Setup does not change receiver
-settings; those are saved on the receiver itself. Mission Planner needs valid
-base-position and observation messages to compute an RTK solution.
+Switch back to **RTCM corrections** before connecting Mission Planner to the
+correction stream. A running service and an open TCP port do not by themselves
+confirm that valid RTCM messages are reaching the client.
 
-### Receiver readiness and first run
+## Dashboard
 
-Before expecting an RTK solution, confirm all of the following:
+The dashboard refreshes its diagnostics automatically. Panel headings collapse
+and expand, and the browser remembers each panel's state.
 
-1. The receiver is connected to a GNSS antenna with a clear view of the sky.
-2. The receiver is configured as a stationary base and outputs RTCM 3 on its
-   USB/serial connection. The stream should include observation messages such
-   as GPS MSM and a valid base reference-position message such as RTCM 1005.
-3. The base position has been surveyed or fixed in the receiver's own base
-   configuration. Keep the antenna stationary during survey-in.
+In GPS telemetry mode, the dashboard can show the receiver on an OpenStreetMap
+map, a satellite sky plot, signal bars, DOP values, and GPSD's estimated
+accuracy and fix time. Map tiles require an internet connection.
 
-Receiver setup differs by model. The [CubePilot HERE 3 manual](https://github.com/CubePilot/cubepilot-docs/blob/master/here-3/here-3-manual.md)
-describes its base-station survey and RTCM status workflow.
+The 3D GNSS view can be dragged to rotate and scrolled to zoom. Hover over a
+satellite for its signal and sky details. The plotted positions and recent
+trails are approximate: GPSD supplies azimuth and elevation, while the view uses
+representative constellation orbit heights rather than each satellite's live
+ephemeris.
 
-After setup, use these commands to check the Pi-side services and stream:
+The **Files** button provides selected logs and installed configuration files.
+The **README** button opens this guide in the dashboard. The **Update** button
+pulls the latest repository version and runs setup again. Updating runs
+`git reset --hard` in the configured checkout, so tracked local changes there
+are discarded.
+
+## Check services and stream
 
 ```bash
-# Confirm services are active
+# Check service state
 sudo systemctl status str2str rtk-dashboard nginx
 
-# Confirm which TCP port str2str selected
+# See the selected RTCM port and listening sockets
 cat /var/lib/rtk-base/stream-port
 sudo ss -ltnp
 
-# Inspect receiver and stream status
+# Inspect recent stream output
 sudo journalctl -u str2str -n 50 --no-pager
 ```
 
-The dashboard's GPS telemetry mode can help confirm a position fix and visible
-satellites, but selecting it stops `str2str` while GPSD uses the receiver. Switch
-back to **RTCM corrections** before checking the correction stream in Mission
-Planner. A running service and an open TCP port alone do not prove that valid
-RTCM messages are reaching the client.
+These checks confirm that the Pi-side services are running. They do not confirm
+that the receiver has a valid GNSS fix or is producing usable RTCM corrections.
 
-GPS telemetry mode also shows the receiver on an interactive OpenStreetMap
-map, a satellite sky plot, signal-strength bars, DOP values, and GPSD's
-estimated accuracy and fix time. The map and its tiles need an internet
-connection; the GPS and satellite graphics use the receiver's GPSD data. The
-GPSD sky view reports visible satellites and marks which ones are used in the
-current fix.
+## Troubleshooting
 
-The Resources panel shows Wi-Fi signal in dBm, a rough signal meter, link rate,
-frequency, and total traffic on the default network interface since boot. The
-System panel shows the RTCM output port, connected RTCM clients, and stream
-restart count. Select any panel heading to collapse or expand it; that choice
-is remembered in the browser.
+- **Receiver not detected:** connect it before setup and check that it appears
+  under `/dev/serial/by-id`.
+- **No GPS telemetry:** switch to GPS telemetry mode, check the antenna view,
+  and confirm the receiver is sending GNSS data to GPSD.
+- **No RTCM connection:** switch back to RTCM corrections, check the active
+  port in the System panel, and use that port in the client.
+- **Client connects but no RTK solution:** verify the receiver's base position
+  and RTCM output, including observation and reference-position messages.
+- **Need service logs:** use `sudo journalctl -u <service> -n 100 --no-pager`,
+  replacing `<service>` with `str2str`, `rtk-dashboard`, or `nginx`.
 
-## Useful commands
+## Services and ports
 
-```bash
-# Check service status
-sudo systemctl status str2str
-sudo systemctl status rtk-dashboard
-sudo systemctl status nginx
+| Service | Address | Purpose |
+| --- | --- | --- |
+| Dashboard | `http://<pi-ip>` (port 80) | Diagnostics and receiver telemetry |
+| RTCM stream | `tcp://<pi-ip>:<active-port>` | Corrections for RTK clients |
+| GPSD telemetry | Local service | Receiver data while telemetry mode is active |
 
-# Follow service logs
-sudo journalctl -u str2str -f
-sudo journalctl -u rtk-dashboard -f
-
-# Restart services
-sudo systemctl restart str2str rtk-dashboard nginx
-```
-
-Made for reliable field use.
+Made for practical RTK base station monitoring in the field.
