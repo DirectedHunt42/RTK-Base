@@ -680,19 +680,20 @@ HTML = r"""
   .sky-cross { stroke: #1e3b2d; stroke-width: 1; }
   .sky-cardinal { fill: var(--dim); font: 10px 'JetBrains Mono', monospace; text-anchor: middle; }
   .sky-sat { fill: #242a27; stroke: #d3ddd7; stroke-width: 1.5; }
-  .sky-sat.used { stroke: var(--green); stroke-width: 2.5; }
+  .sky-satellite-icon { pointer-events: none; }
+  .sky-satellite-icon.unused { filter: grayscale(1); }
   .sky-label { fill: var(--text); font: 8px 'JetBrains Mono', monospace; text-anchor: middle; }
-  .sky-legend { display: flex; flex-wrap: wrap; justify-content: center; gap: 7px 13px; margin: 8px 0 2px; color: var(--dim); font-size: 11px; }
-  .sky-legend-item { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
-  .sky-legend svg { width: 13px; height: 13px; overflow: visible; }
+  .sky-legend { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 8px; margin: 8px 0 2px; color: var(--dim); font-size: 9px; }
+  .sky-legend-item { display: inline-flex; align-items: center; gap: 3px; white-space: nowrap; }
+  .sky-legend svg { width: 15px; height: 15px; overflow: visible; flex: 0 0 auto; }
   .sky-legend-shape { fill: #242a27; stroke: #d3ddd7; stroke-width: 1.5; }
-  .sky-used-key { display: inline-block; width: 9px; height: 9px; border: 2px solid var(--green); border-radius: 50%; }
   .satellite-details { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: 12px; max-height: 330px; overflow: auto; padding: 2px 2px 8px; }
   .satellite-group { min-width: 0; border: 1px solid var(--border); border-radius: 5px; padding: 8px; }
   .satellite-group h3 { margin: 0 0 8px; color: var(--green); font-size: 12px; }
   .signal-list { display: grid; align-content: start; gap: 7px; }
   .signal-row { display: grid; grid-template-columns: minmax(62px, 1fr) auto 60px; gap: 8px; align-items: center; font-size: 11px; min-width: 0; }
   .signal-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .signal-country { display: block; color: var(--muted); font-size: 9px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .sat-cell { display: flex; align-items: end; gap: 2px; height: 18px; }
   .sat-cell i { display: block; width: 5px; background: #303030; border-radius: 1px 1px 0 0; }
   .sat-cell i:nth-child(1) { height: 5px; }
@@ -1027,7 +1028,7 @@ HTML = r"""
         </svg>
       </div>
       <div id="sky-legend" class="sky-legend" aria-label="Sky map legend"></div>
-      <div class="map-note">Satellite shape identifies its constellation. A green outline marks satellites used in the fix.</div>
+      <div class="map-note">Satellite icon identifies its constellation. Icons in grayscale are not used in the fix.</div>
     </div>
 
     <div class="card">
@@ -1351,6 +1352,7 @@ function updateSatelliteGraphics(satellites) {
   const skyLegend = document.getElementById('sky-legend');
   const shapeKinds = { GPS: 'circle', SBAS: 'square', Galileo: 'triangle', BeiDou: 'diamond', IMES: 'pentagon', QZSS: 'hexagon', GLONASS: 'plus', NavIC: 'star' };
   const constellationOf = satellite => String(satellite.id || 'Unknown').replace(/\s+\S+$/, '');
+  const constellationCountry = name => ({ GPS: 'United States', Galileo: 'European Union', GLONASS: 'Russia', BeiDou: 'China', QZSS: 'Japan', NavIC: 'India', IMES: 'Japan', SBAS: 'Regional system (multiple countries)' })[name] || 'Unknown';
   const signalClass = signal => signal < 20 ? 'signal-weak' : signal < 30 ? 'signal-fair' : signal < 40 ? 'signal-good' : 'signal-strong';
   const appendShape = (svg, name, className, radius = 5) => {
     const kind = shapeKinds[name] || 'circle';
@@ -1383,10 +1385,20 @@ function updateSatelliteGraphics(satellites) {
   list.replaceChildren();
   constellationList.replaceChildren();
   skyLegend.replaceChildren();
+  Object.entries(ORBIT_ICON_URLS).forEach(([name, url]) => {
+    const legendItem = document.createElement('span');
+    legendItem.className = 'sky-legend-item';
+    const icon = document.createElementNS(svgNamespace, 'svg');
+    icon.setAttribute('viewBox', '0 0 64 64');
+    const image = document.createElementNS(svgNamespace, 'image');
+    image.setAttribute('href', url); image.setAttribute('width', '64'); image.setAttribute('height', '64');
+    icon.appendChild(image);
+    legendItem.append(icon, document.createTextNode(name));
+    skyLegend.appendChild(legendItem);
+  });
   if (!satellites || satellites.length === 0) {
     list.textContent = 'No satellite data available';
     constellationList.textContent = 'No constellation data available';
-    skyLegend.textContent = 'No constellation data';
     return;
   }
   const constellations = new Map();
@@ -1421,7 +1433,12 @@ function updateSatelliteGraphics(satellites) {
       row.className = 'signal-row';
       const label = document.createElement('span');
       label.className = 'signal-name';
-      label.textContent = `${satellite.used ? 'USED ' : ''}${satellite.id}`;
+      const labelText = document.createElement('span');
+      labelText.textContent = `${satellite.used ? 'USED ' : ''}${satellite.id}`;
+      const countryText = document.createElement('small');
+      countryText.className = 'signal-country';
+      countryText.textContent = constellationCountry(name);
+      label.append(labelText, countryText);
       const bars = document.createElement('div');
       const strength = hasSignal ? Math.max(0, Math.min(4, Math.ceil(signal / 10))) : 0;
       bars.className = `sat-cell ${hasSignal ? signalClass(signal) : ''}`;
@@ -1439,18 +1456,7 @@ function updateSatelliteGraphics(satellites) {
     group.appendChild(rows);
     list.appendChild(group);
 
-    const legendItem = document.createElement('span');
-    legendItem.className = 'sky-legend-item';
-    const legendShape = document.createElementNS(svgNamespace, 'svg');
-    legendShape.setAttribute('viewBox', '-8 -8 16 16');
-    appendShape(legendShape, name, 'sky-legend-shape', 5);
-    legendItem.append(legendShape, document.createTextNode(name));
-    skyLegend.appendChild(legendItem);
   });
-  const usedKey = document.createElement('span');
-  usedKey.className = 'sky-legend-item';
-  usedKey.innerHTML = '<i class="sky-used-key"></i>Used in fix';
-  skyLegend.appendChild(usedKey);
   satellites.forEach(satellite => {
     const az = Number(satellite.azimuth);
     const el = Number(satellite.elevation);
@@ -1462,12 +1468,22 @@ function updateSatelliteGraphics(satellites) {
       const x = 120 + radius * Math.sin(angle);
       const y = 120 - radius * Math.cos(angle);
       const group = document.createElementNS(svgNamespace, 'g');
-      const dot = appendShape(group, constellationOf(satellite), satellite.used ? 'sky-sat used' : 'sky-sat', 5);
-      dot.setAttribute('transform', `translate(${x.toFixed(1)} ${y.toFixed(1)})`);
+      const constellation = constellationOf(satellite);
+      const iconUrl = ORBIT_ICON_URLS[constellation];
+      if (iconUrl) {
+        const icon = document.createElementNS(svgNamespace, 'image');
+        icon.setAttribute('href', iconUrl);
+        icon.setAttribute('x', (x - 8).toFixed(1)); icon.setAttribute('y', (y - 8).toFixed(1));
+        icon.setAttribute('width', '16'); icon.setAttribute('height', '16');
+        icon.setAttribute('class', satellite.used ? 'sky-satellite-icon' : 'sky-satellite-icon unused');
+        group.appendChild(icon);
+      } else {
+        const dot = appendShape(group, constellation, satellite.used ? 'sky-sat used' : 'sky-sat', 5);
+        dot.setAttribute('transform', `translate(${x.toFixed(1)} ${y.toFixed(1)})`);
+      }
       const title = document.createElementNS(svgNamespace, 'title');
-      title.textContent = `${satellite.id}: az ${az} deg, el ${el} deg${satellite.used ? ', used' : ''}`;
-      dot.appendChild(title);
-      group.appendChild(dot);
+      title.textContent = `${satellite.id} · ${constellationCountry(constellation)}: az ${az} deg, el ${el} deg${satellite.used ? ', used' : ''}`;
+      group.appendChild(title);
       const label = document.createElementNS(svgNamespace, 'text');
       label.setAttribute('x', x.toFixed(1));
       label.setAttribute('y', (y - 8).toFixed(1));
@@ -1693,10 +1709,12 @@ function showOrbitTooltip(point, clientX, clientY) {
   const card = document.getElementById('orbit-card');
   const cardRect = card.getBoundingClientRect();
   const signal = point.signal === null || point.signal === undefined ? NaN : Number(point.signal);
+  const country = ({ GPS: 'United States', Galileo: 'European Union', GLONASS: 'Russia', BeiDou: 'China', QZSS: 'Japan', NavIC: 'India', IMES: 'Japan', SBAS: 'Regional system (multiple countries)' })[point.name] || 'Unknown';
   orbitTooltip.replaceChildren();
   const title = document.createElement('strong'); title.textContent = point.sat.id;
   const lines = [
     `${point.name} · approx. ${(point.altitude / 1000).toFixed(1)}k km orbit`,
+    `Country of origin: ${country}`,
     `Az ${point.az.toFixed(1)}° · El ${point.el.toFixed(1)}°`,
     point.sat.used ? 'Used in current fix' : 'Visible · not used in fix'
   ];
