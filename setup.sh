@@ -78,7 +78,7 @@ install -o root -g root -m 0755 scripts/maintenance/update.sh /usr/local/sbin/rt
 install -o root -g root -m 0755 scripts/maintenance/download_file.sh /usr/local/sbin/rtk-base-download-file
 printf '%s\n' "$REPO_DIR" > /etc/rtk-base-update-repo
 chmod 0644 /etc/rtk-base-update-repo
-printf '%s\n' "$DASHBOARD_USER ALL=(root) NOPASSWD: /usr/local/sbin/rtk-base-set-mode corrections, /usr/local/sbin/rtk-base-set-mode telemetry, /usr/local/sbin/rtk-base-update, /usr/local/sbin/rtk-base-download-file, /usr/bin/systemctl reboot" > /etc/sudoers.d/rtk-base-dashboard
+printf '%s\n' "$DASHBOARD_USER ALL=(root) NOPASSWD: /usr/local/sbin/rtk-base-set-mode corrections, /usr/local/sbin/rtk-base-set-mode telemetry, /usr/local/sbin/rtk-base-update, /usr/local/sbin/rtk-base-update --approve-apt-upgrade, /usr/local/sbin/rtk-base-update --decline-apt-upgrade, /usr/local/sbin/rtk-base-download-file, /usr/bin/systemctl reboot" > /etc/sudoers.d/rtk-base-dashboard
 chmod 0440 /etc/sudoers.d/rtk-base-dashboard
 visudo -cf /etc/sudoers.d/rtk-base-dashboard
 ln -sf /etc/nginx/sites-available/rtk-base /etc/nginx/sites-enabled/rtk-base

@@ -322,7 +322,7 @@ def get_update_status() -> str:
         status = status_path.read_text(encoding="utf-8").strip()
     except OSError:
         return "Ready to update."
-    if status.startswith(("Starting RTK-Base update", "Updating RTK-Base")):
+    if status.startswith(("Starting RTK-Base update", "Updating RTK-Base", "APT upgrade available:")):
         try:
             status_age = time.time() - status_path.stat().st_mtime
         except OSError:
@@ -775,6 +775,44 @@ HTML = r"""
     overflow-wrap: anywhere;
     font: 12px/1.55 'JetBrains Mono', monospace;
   }
+  #apt-upgrade-dialog-backdrop[hidden] { display: none; }
+  #apt-upgrade-dialog-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 10100;
+    display: grid;
+    place-items: center;
+    padding: 20px;
+    background: rgba(0, 0, 0, 0.78);
+  }
+  .apt-upgrade-dialog {
+    width: min(460px, 100%);
+    padding: 20px;
+    border: 1px solid #28523f;
+    border-radius: 10px;
+    background: var(--card);
+    box-shadow: 0 18px 70px #000;
+  }
+  .apt-upgrade-dialog h2 { color: var(--green); font-size: 1rem; letter-spacing: 1px; }
+  .apt-upgrade-dialog p { color: var(--dim); margin: 12px 0 18px; font-size: 12px; }
+  .apt-upgrade-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 10px; }
+  .apt-upgrade-actions button {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    background: #111;
+    color: var(--green);
+    font: inherit;
+    cursor: pointer;
+  }
+  .apt-upgrade-actions button:hover { background: #002211; border-color: var(--green); }
+  .apt-upgrade-actions button:disabled { cursor: wait; opacity: 0.55; }
+  .apt-upgrade-actions img { width: 18px; height: 18px; }
+  #apt-upgrade-cancel { color: var(--text); }
+  @media (max-width: 600px) { .apt-upgrade-actions { justify-content: stretch; } .apt-upgrade-actions button { flex: 1; justify-content: center; } }
   @media (max-width: 600px) {
     #update-terminal-screen { padding: 12px; }
     .terminal-heading { flex-direction: column; gap: 4px; }
@@ -1125,6 +1163,21 @@ HTML = r"""
     <pre id="update-terminal-output" aria-label="Live output from the update and setup scripts"></pre>
   </section>
 
+  <div id="apt-upgrade-dialog-backdrop" hidden>
+    <section class="apt-upgrade-dialog" role="dialog" aria-modal="true" aria-labelledby="apt-upgrade-title" aria-describedby="apt-upgrade-message">
+      <h2 id="apt-upgrade-title">SYSTEM PACKAGES AVAILABLE</h2>
+      <p id="apt-upgrade-message"></p>
+      <div class="apt-upgrade-actions">
+        <button id="apt-upgrade-cancel" type="button" onclick="respondToAptUpgrade(false)">
+          <img src="{{ url_for('static', filename='icons/close.svg') }}" alt="" aria-hidden="true"><span>Cancel</span>
+        </button>
+        <button id="apt-upgrade-confirm" type="button" onclick="respondToAptUpgrade(true)">
+          <img src="{{ url_for('static', filename='icons/update.svg') }}" alt="" aria-hidden="true"><span>Upgrade</span>
+        </button>
+      </div>
+    </section>
+  </div>
+
   <div id="file-dialog-backdrop" class="file-dialog-backdrop" hidden onclick="handleFileDialogBackdrop(event)">
     <section class="file-dialog" role="dialog" aria-modal="true" aria-labelledby="file-dialog-title">
       <div class="file-dialog-heading">
@@ -1217,6 +1270,7 @@ const DOWNLOAD_ICON_URL = "{{ url_for('static', filename='icons/download.svg') }
 let updateOutputOffset = 0;
 let updatePollTimer = null;
 let updateReturnTimer = null;
+let updateUpgradePromptShown = false;
 const trafficHistory = [];
 function formatRate(bytesPerSecond) {
   if (bytesPerSecond >= 1024 ** 2) return `${(bytesPerSecond / 1024 ** 2).toFixed(2)} MiB/s`;
@@ -1868,7 +1922,7 @@ async function refresh() {
     document.getElementById('telemetry-mode').classList.toggle('active', d.mode === 'telemetry');
     const updateStatus = d.update_status || 'Ready to update.';
     document.getElementById('action-message').textContent = updateStatus;
-    document.getElementById('update-button').disabled = updateStatus.startsWith('Starting RTK-Base update') || updateStatus.startsWith('Updating RTK-Base');
+    document.getElementById('update-button').disabled = updateStatus.startsWith('Starting RTK-Base update') || updateStatus.startsWith('Updating RTK-Base') || updateStatus.startsWith('APT upgrade available:');
   } catch (e) {
     console.error(e);
   }
@@ -1917,6 +1971,7 @@ async function updatePi() {
   const button = document.getElementById('update-button');
   button.disabled = true;
   updateOutputOffset = 0;
+  updateUpgradePromptShown = false;
   document.getElementById('update-terminal-output').textContent = '';
   document.getElementById('update-terminal-status').textContent = 'Starting update...';
   document.getElementById('update-terminal-screen').classList.add('active');
@@ -2209,6 +2264,12 @@ async function pollUpdateOutput() {
     }
     updateOutputOffset = result.offset;
     document.getElementById('update-terminal-status').textContent = result.status;
+    if (result.status.startsWith('APT upgrade available:') && !updateUpgradePromptShown) {
+      updateUpgradePromptShown = true;
+      const packageCount = result.status.match(/APT upgrade available: (\d+)/)?.[1] || 'some';
+      document.getElementById('apt-upgrade-message').textContent = `${packageCount} system package(s) can be upgraded. Upgrade output will appear in this progress terminal.`;
+      document.getElementById('apt-upgrade-dialog-backdrop').hidden = false;
+    }
     if (result.done) {
       updateReturnTimer = window.setTimeout(() => {
         closeUpdateTerminal();
@@ -2220,6 +2281,27 @@ async function pollUpdateOutput() {
     document.getElementById('update-terminal-status').textContent = 'Dashboard restarting or reconnecting...';
   }
   updatePollTimer = window.setTimeout(pollUpdateOutput, 800);
+}
+async function respondToAptUpgrade(approve) {
+  const buttons = document.querySelectorAll('.apt-upgrade-actions button');
+  buttons.forEach(button => button.disabled = true);
+  try {
+    const response = await fetch('/api/update/apt-upgrade', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ approve })
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || 'Could not submit the system upgrade choice');
+    document.getElementById('apt-upgrade-dialog-backdrop').hidden = true;
+    document.getElementById('update-terminal-status').textContent = approve
+      ? 'Starting system package upgrade...'
+      : 'Continuing without system package upgrades...';
+  } catch (error) {
+    document.getElementById('apt-upgrade-message').textContent = error.message;
+  } finally {
+    buttons.forEach(button => button.disabled = false);
+  }
 }
 setupCollapsiblePanels();
 refresh();
@@ -2321,7 +2403,7 @@ def api_reboot():
 
 @app.route("/api/update", methods=["POST"])
 def api_update():
-    if get_update_status().startswith(("Starting RTK-Base update", "Updating RTK-Base")):
+    if get_update_status().startswith(("Starting RTK-Base update", "Updating RTK-Base", "APT upgrade available:")):
         return jsonify({"error": "An RTK-Base update is already running"}), 409
     log_path = Path("/var/log/rtk-base-update.log")
     try:
@@ -2341,7 +2423,7 @@ def api_update():
     except OSError:
         return jsonify({"error": "Could not start the update command"}), 500
     for _ in range(60):
-        if get_update_status().startswith(("Starting RTK-Base update", "Updating RTK-Base")):
+        if get_update_status().startswith(("Starting RTK-Base update", "Updating RTK-Base", "APT upgrade available:")):
             return jsonify({"status": "updating"}), 202
         try:
             log_stat = log_path.stat()
@@ -2381,6 +2463,26 @@ def api_update_output():
         "done": done,
         "success": success,
     })
+
+@app.route("/api/update/apt-upgrade", methods=["POST"])
+def api_update_apt_upgrade():
+    if not get_update_status().startswith("APT upgrade available:"):
+        return jsonify({"error": "There is no pending system upgrade prompt"}), 409
+    payload = request.get_json(silent=True) or {}
+    approve = payload.get("approve")
+    if not isinstance(approve, bool):
+        return jsonify({"error": "An approve choice is required"}), 400
+    option = "--approve-apt-upgrade" if approve else "--decline-apt-upgrade"
+    try:
+        result = subprocess.run(
+            ["sudo", "-n", "/usr/local/sbin/rtk-base-update", option],
+            capture_output=True, text=True, timeout=5, check=False
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return jsonify({"error": "Could not submit the system upgrade choice"}), 500
+    if result.returncode != 0:
+        return jsonify({"error": result.stderr.strip() or "System upgrade choice was rejected"}), 500
+    return jsonify({"status": "upgrade" if approve else "skipped"}), 202
 
 @app.route("/api/downloads")
 def api_downloads():

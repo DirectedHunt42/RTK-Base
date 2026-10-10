@@ -9,12 +9,30 @@ LOG_FILE=/var/log/rtk-base-update.log
 STATUS_FILE=/var/lib/rtk-base/update-status
 LOCK_FILE=/run/lock/rtk-base-update.lock
 START_LOCK_FILE=/run/lock/rtk-base-update-start.lock
+APT_UPGRADE_DECISION=/var/lib/rtk-base/apt-upgrade-decision
 mkdir -p /var/lib/rtk-base
 
 set_status() {
   printf '%s\n' "$1" > "$STATUS_FILE"
   chmod 0644 "$STATUS_FILE"
 }
+
+case "${1:-}" in
+  --approve-apt-upgrade|--decline-apt-upgrade)
+    current_status="$(cat "$STATUS_FILE" 2>/dev/null || true)"
+    case "$current_status" in
+      "APT upgrade available:"*) ;;
+      *) echo "No pending apt upgrade prompt" >&2; exit 1 ;;
+    esac
+    if [ "$1" = "--approve-apt-upgrade" ]; then
+      printf 'upgrade\n' > "$APT_UPGRADE_DECISION"
+    else
+      printf 'skip\n' > "$APT_UPGRADE_DECISION"
+    fi
+    chmod 0644 "$APT_UPGRADE_DECISION"
+    exit 0
+    ;;
+esac
 
 if [ "${1:-}" != "--run" ]; then
   if [ "$#" -ne 0 ]; then
@@ -72,6 +90,7 @@ chmod 0644 "$LOG_FILE"
 
 trap 'result=$?; if [ "$result" -ne 0 ]; then set_status "Update failed (exit $result). See /var/log/rtk-base-update.log."; fi' EXIT
 set_status "Updating RTK-Base..."
+rm -f "$APT_UPGRADE_DECISION"
 
 if [ ! -d "$REPO_DIR/.git" ] || [ ! -f "$REPO_DIR/setup.sh" ]; then
   echo "RTK-Base repository not found at $REPO_DIR" >&2
@@ -96,6 +115,32 @@ chmod +x "$REPO_DIR/setup.sh"
 echo "Running setup"
 cd "$REPO_DIR"
 ./setup.sh
+
+echo "Refreshing package lists before checking for system upgrades"
+apt-get update
+upgradeable_count="$(apt-get --just-print upgrade | awk '/^Inst / { count++ } END { print count+0 }')"
+if [ "$upgradeable_count" -gt 0 ]; then
+  rm -f "$APT_UPGRADE_DECISION"
+  echo "$upgradeable_count system package(s) can be upgraded"
+  set_status "APT upgrade available: $upgradeable_count package(s). Waiting for confirmation."
+  for _ in $(seq 1 300); do
+    decision="$(cat "$APT_UPGRADE_DECISION" 2>/dev/null || true)"
+    if [ "$decision" = "upgrade" ]; then
+      set_status "Upgrading system packages..."
+      echo "Starting apt upgrade"
+      apt-get upgrade -y
+      break
+    elif [ "$decision" = "skip" ]; then
+      echo "APT upgrade declined"
+      break
+    fi
+    sleep 1
+  done
+  rm -f "$APT_UPGRADE_DECISION"
+  if [ "${decision:-}" != "upgrade" ] && [ "${decision:-}" != "skip" ]; then
+    echo "APT upgrade prompt timed out; continuing without upgrading packages"
+  fi
+fi
 
 set_status "Update complete."
 trap - EXIT
