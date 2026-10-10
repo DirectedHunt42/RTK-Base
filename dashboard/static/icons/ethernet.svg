@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" fill="none" stroke="#00e889" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" role="img" aria-labelledby="title">
+  <title id="title">Ethernet connection</title>
+  <path d="M24 17v7M11 24h26M11 24v6m26-6v6"/>
+  <rect x="17" y="5" width="14" height="12" rx="1" fill="#00e889"/>
+  <rect x="4" y="30" width="14" height="12" rx="1" fill="#00e889"/>
+  <rect x="30" y="30" width="14" height="12" rx="1" fill="#00e889"/>
+  <path d="M21 11h6M8 36h6m20 0h6" stroke="#07120d" stroke-width="2"/>
+</svg>

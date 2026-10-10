@@ -138,6 +138,26 @@ def get_wifi_data() -> dict:
             result["bitrate"] = line.split(":", 1)[1].strip()
     return result
 
+def get_ethernet_data() -> list:
+    """Return wired interfaces with an active physical carrier."""
+    interfaces = []
+    for name, addresses in psutil.net_if_addrs().items():
+        if name == "lo" or os.path.isdir(f"/sys/class/net/{name}/wireless"):
+            continue
+        try:
+            interface_type = Path(f"/sys/class/net/{name}/type")
+            carrier_file = Path(f"/sys/class/net/{name}/carrier")
+            if interface_type.read_text(encoding="ascii").strip() != "1":
+                continue
+            if carrier_file.read_text(encoding="ascii").strip() != "1":
+                continue
+        except (OSError, ValueError):
+            continue
+        ipv4 = [address.address for address in addresses
+                if address.family == socket.AF_INET and not address.address.startswith("127.")]
+        interfaces.append({"interface": name, "addresses": ipv4})
+    return interfaces
+
 _traffic_sample = None
 
 def get_network_traffic() -> dict:
@@ -636,6 +656,9 @@ HTML = r"""
     transition: width 0.6s ease;
   }
   .wifi-signal-display { display: flex; align-items: center; gap: 10px; margin: 10px 0; }
+  .ethernet-status { display: flex; align-items: center; gap: 10px; margin: 10px 0; }
+  .ethernet-icon { width: 34px; height: 28px; filter: grayscale(1); opacity: 0.55; transition: filter 0.2s ease, opacity 0.2s ease; }
+  .ethernet-icon.active { filter: none; opacity: 1; }
   .flow-legend { display: flex; gap: 16px; color: var(--dim); font-size: 11px; margin: 8px 0 2px; }
   .flow-legend .rx { color: var(--green); }
   .flow-legend .tx { color: var(--amber); }
@@ -1033,6 +1056,7 @@ HTML = r"""
 
     <div class="card">
       <h2>Network</h2>
+      <div class="ethernet-status"><img class="ethernet-icon" src="{{ url_for('static', filename='icons/ethernet.svg') }}" alt="Ethernet"><span id="ethernet-status">No active Ethernet connection</span></div>
       <div class="metric"><span>Wi-Fi interface</span><span id="wifi-interface">—</span></div>
       <div class="metric"><span>Network</span><span id="wifi-ssid">—</span></div>
       <div class="wifi-signal-display"><svg class="wifi-icon" viewBox="0 0 36 30" role="img" aria-label="Wi-Fi signal strength"><path class="wifi-segment" d="M2 9 Q18 -3 34 9"/><path class="wifi-segment" d="M7 15 Q18 7 29 15"/><path class="wifi-segment" d="M12 21 Q18 16 24 21"/><circle class="wifi-segment" cx="18" cy="27" r="1.8"/></svg><span id="wifi-signal">—</span></div>
@@ -1790,6 +1814,11 @@ async function refresh() {
     document.getElementById('str-restarts').textContent = d.str_restarts;
     document.getElementById('stream-uptime').textContent = d.stream_uptime;
     document.getElementById('wifi-interface').textContent = d.wifi.interface;
+    const ethernet = d.ethernet || [];
+    document.querySelector('.ethernet-icon').classList.toggle('active', ethernet.length > 0);
+    document.getElementById('ethernet-status').textContent = ethernet.length
+      ? ethernet.map(item => `${item.interface}${item.addresses.length ? ` (${item.addresses.join(', ')})` : ''}`).join(', ')
+      : 'No active Ethernet connection';
     document.getElementById('wifi-ssid').textContent = d.wifi.ssid;
     const wifiDbm = Number(d.wifi.dbm);
     const hasWifiSignal = d.wifi.dbm !== null && Number.isFinite(wifiDbm);
@@ -2247,6 +2276,7 @@ def api_data():
         "str_restarts": get_service_restarts(),
         "stream_uptime": get_stream_uptime(),
         "wifi": get_wifi_data(),
+        "ethernet": get_ethernet_data(),
         "network_traffic": get_network_traffic(),
         "str_status": str_status,
         "str_log": str_log,
