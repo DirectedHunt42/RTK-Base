@@ -808,10 +808,12 @@ HTML = r"""
     font: inherit;
     cursor: pointer;
   }
-  .apt-upgrade-actions button:hover { background: #002211; border-color: var(--green); }
   .apt-upgrade-actions button:disabled { cursor: wait; opacity: 0.55; }
   .apt-upgrade-actions img { width: 18px; height: 18px; }
-  #apt-upgrade-cancel { color: var(--text); }
+  #apt-upgrade-confirm { color: var(--green); border-color: #28523f; }
+  #apt-upgrade-confirm:hover { background: #002211; border-color: var(--green); }
+  #apt-upgrade-cancel { color: var(--red); border-color: #713333; }
+  #apt-upgrade-cancel:hover { background: #3a1111; border-color: var(--red); }
   @media (max-width: 600px) { .apt-upgrade-actions { justify-content: stretch; } .apt-upgrade-actions button { flex: 1; justify-content: center; } }
   @media (max-width: 600px) {
     #update-terminal-screen { padding: 12px; }
