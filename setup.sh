@@ -24,7 +24,12 @@ fi
 
 echo "[1/7] Installing dependencies..."
 apt update
-apt install -y python3-flask python3-psutil nginx gpsd sudo iw iproute2 usbutils rtklib
+mapfile -t APT_PACKAGES < <(python3 -c 'import json; print("\n".join(json.load(open("packages.json"))["apt"]))')
+if [ "${#APT_PACKAGES[@]}" -eq 0 ]; then
+  echo "No APT packages found in packages.json" >&2
+  exit 1
+fi
+apt install -y "${APT_PACKAGES[@]}"
 
 if [ ! -x /usr/bin/str2str ]; then
   echo "RTKLIB package installed but /usr/bin/str2str is missing" >&2

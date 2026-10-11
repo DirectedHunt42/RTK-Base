@@ -1,0 +1,13 @@
+{
+  "apt": [
+    "python3-flask",
+    "python3-psutil",
+    "nginx",
+    "gpsd",
+    "sudo",
+    "iw",
+    "iproute2",
+    "usbutils",
+    "rtklib"
+  ]
+}
