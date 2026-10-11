@@ -6,7 +6,7 @@
 
 <p align="center">A Raspberry Pi RTK base station with an RTCM correction stream and a live GNSS diagnostics dashboard.</p>
 
-<p align="center"><strong>Dashboard version 0.11.1</strong></p>
+<p align="center"><strong>Dashboard version 0.11.2</strong></p>
 
 <p align="center">
   <img src="dashboard/static/icons/satellite-gps.svg" alt="GPS" width="28" height="28" title="GPS">

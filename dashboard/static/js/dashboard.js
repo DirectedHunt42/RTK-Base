@@ -874,7 +874,19 @@ function escapeReadmeHtml(value) {
   return String(value).replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]);
 }
 function readmeInline(value) {
-  let html = escapeReadmeHtml(value);
+  const icons = [];
+  const withIconTokens = String(value).replace(/<img\b([^>]*)>/gi, (tag, attributes) => {
+    const source = attributes.match(/\bsrc="(dashboard\/static\/icons\/[\w.-]+\.svg)"/i)?.[1];
+    const alt = attributes.match(/\balt="([^"]*)"/i)?.[1];
+    const width = attributes.match(/\bwidth="(\d+)"/i)?.[1];
+    const height = attributes.match(/\bheight="(\d+)"/i)?.[1];
+    if (!source || alt === undefined || !width || !height) return tag;
+    const token = `READMEICON${icons.length}TOKEN`;
+    icons.push(`<img src="/static/icons/${source.split('/').pop()}" alt="${escapeReadmeHtml(alt)}" width="${width}" height="${height}">`);
+    return token;
+  });
+  let html = escapeReadmeHtml(withIconTokens);
+  html = html.replace(/READMEICON(\d+)TOKEN/g, (token, index) => icons[Number(index)] || token);
   html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
   html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
   html = html.replace(/\*([^*]+)\*/g, '<em>$1</em>');
@@ -892,8 +904,8 @@ function renderReadme(markdown, target) {
     if (!line) { index += 1; continue; }
     if (line === '<p align="center">') { blocks.push('<div class="readme-center">'); index += 1; continue; }
     if (line === '</p>') { blocks.push('</div>'); index += 1; continue; }
-    const image = line.match(/^<img src="(dashboard\/static\/icons\/[\w.-]+\.svg)" alt="([^"]*)" width="(\d+)" height="(\d+)">$/);
-    if (image) { blocks.push(`<img src="/static/${image[1].replace('dashboard/static/', '')}" alt="${escapeReadmeHtml(image[2])}" width="${image[3]}" height="${image[4]}">`); index += 1; continue; }
+    const image = line.match(/^<img\b[^>]*\bsrc="dashboard\/static\/icons\/[\w.-]+\.svg"[^>]*>$/);
+    if (image) { blocks.push(readmeInline(line)); index += 1; continue; }
     const centeredHeading = line.match(/^<h1 align="center">(.*?)<\/h1>$/);
     if (centeredHeading) { blocks.push(`<h1 class="readme-center">${escapeReadmeHtml(centeredHeading[1])}</h1>`); index += 1; continue; }
     const centeredParagraph = line.match(/^<p align="center">(.*?)<\/p>$/);
