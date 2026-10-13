@@ -639,7 +639,7 @@ async function refresh() {
     document.getElementById('temp').textContent = d.temp;
     document.getElementById('ip').textContent = d.ip;
 
-    document.getElementById('cpu').textContent = d.cpu + ' %';
+    document.getElementById('cpu').textContent = d.cpu.toFixed(1) + ' %';
     document.getElementById('cpu-bar').style.width = d.cpu + '%';
     document.getElementById('mem').textContent = d.mem;
     document.getElementById('mem-bar').style.width = d.mem_pct + '%';
