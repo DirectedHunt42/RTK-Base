@@ -394,7 +394,7 @@
   #apt-upgrade-cancel { color: var(--red); border-color: #713333; }
   #apt-upgrade-cancel:hover { background: #3a1111; border-color: var(--red); }
   @media (max-width: 600px) { .apt-upgrade-actions { justify-content: stretch; } .apt-upgrade-actions button { flex: 1; justify-content: center; } }
-  @media (max-width: 600px) {
+  @media (max-width: 720px) {
     #update-terminal-screen { padding: 12px; }
     .terminal-heading { flex-direction: column; gap: 4px; }
     #update-terminal-status { text-align: left; }
@@ -529,4 +529,67 @@
   }
   .repo-associations { display: grid; gap: 4px; max-height: 190px; overflow: auto; }
   .repo-association { color: var(--dim); font-size: 10px; overflow-wrap: anywhere; }
+  @media (max-width: 600px) {
+    body { padding: 16px; }
+    header {
+      display: flex;
+      flex-direction: column;
+      align-items: stretch;
+      gap: 4px;
+      margin-bottom: 20px;
+      padding: 0;
+    }
+    h1 {
+      order: 0;
+      font-size: clamp(1.15rem, 2.5vw, 1.5rem);
+      line-height: 1.35;
+      letter-spacing: 1px;
+    }
+    .subtitle {
+      order: 1;
+      overflow-wrap: anywhere;
+    }
+    .header-actions {
+      position: static;
+      order: 2;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 4px;
+      width: 100%;
+    }
+    .header-action-buttons { flex-wrap: wrap; }
+    #action-message {
+      max-width: 100%;
+      overflow-wrap: anywhere;
+      text-align: left;
+      white-space: normal;
+    }
+    .grid {
+      grid-template-columns: minmax(0, 1fr);
+      gap: 14px;
+    }
+    .card {
+      min-width: 0;
+      aspect-ratio: auto;
+      overflow: visible;
+      padding: 16px;
+    }
+    #flow-card { overflow: visible; }
+    .metric { align-items: flex-start; gap: 12px; }
+    .metric span { min-width: 0; }
+    .metric span:last-child {
+      overflow-wrap: anywhere;
+      text-align: right;
+    }
+    .scroll-fill {
+      min-height: 90px;
+      max-height: 260px;
+    }
+    #orbit-card {
+      min-height: 660px;
+      overflow: hidden;
+      padding: 16px;
+    }
+  }
   .repo-association strong { color: var(--green); font-weight: 400; }
