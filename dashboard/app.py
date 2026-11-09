@@ -5,9 +5,10 @@ Terminal-style web interface
 """
 
 from flask import Flask, render_template, jsonify, request, Response
-import json, subprocess, os, socket, psutil, time
+import json, subprocess, os, socket, psutil, time, math
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Optional
 
 app = Flask(__name__)
 APP_VERSION = (Path(__file__).resolve().parent / "VERSION").read_text(encoding="utf-8").strip()
@@ -26,6 +27,16 @@ def get_temp() -> str:
     if t:
         return t.replace("temp=", "").replace("'C", " °C")
     return "N/A"
+
+def get_temp_c() -> Optional[float]:
+    temperature_text = get_temp()
+    if not temperature_text.endswith(" °C"):
+        return None
+    try:
+        temperature = float(temperature_text[:-3])
+        return temperature if math.isfinite(temperature) else None
+    except ValueError:
+        return None
 
 def get_str2str():
     status = run("systemctl is-active str2str 2>/dev/null") or "unknown"
@@ -316,6 +327,13 @@ def get_uptime() -> str:
     except Exception:
         return "N/A"
 
+def get_uptime_seconds() -> Optional[int]:
+    try:
+        with open("/proc/uptime") as f:
+            return int(float(f.read().split()[0]))
+    except (OSError, ValueError, IndexError):
+        return None
+
 def get_update_status() -> str:
     try:
         status_path = Path("/var/lib/rtk-base/update-status")
@@ -442,14 +460,21 @@ def api_data():
         "hostname": socket.gethostname(),
         "local_hostname": local_hostname,
         "uptime": get_uptime(),
+        "uptime_seconds": get_uptime_seconds(),
         "temp": get_temp(),
+        "temp_c": get_temp_c(),
         "ip": ip,
         "cpu": round(cpu, 1),
         "mem": f"{mem.used // 1024 // 1024} / {mem.total // 1024 // 1024} MB ({mem.percent}%)",
+        "memory_used_bytes": mem.used,
+        "memory_total_bytes": mem.total,
         "mem_pct": mem.percent,
         "disk": f"{disk.used // 1024 // 1024 // 1024:.1f} / {disk.total // 1024 // 1024 // 1024:.1f} GB ({disk.percent}%)",
         "disk_pct": disk.percent,
         "load": f"{load[0]:.2f}   {load[1]:.2f}   {load[2]:.2f}",
+        "load_1m": load[0],
+        "load_5m": load[1],
+        "load_15m": load[2],
         "rtcm_port": get_rtcm_port(),
         "rtcm_clients": rtcm_client_count,
         "str_restarts": get_service_restarts(),

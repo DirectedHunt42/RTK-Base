@@ -1,0 +1,55 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to RTK-Base",
+        "description": "Enter the Raspberry Pi address serving the RTK-Base dashboard. The default HTTP port is 80.",
+        "data": {
+          "host": "Pi address"
+        },
+        "data_description": {
+          "host": "For example, http://rtk-base.local or http://192.168.1.25. Port 80 is the default; include a port only if you configured nginx to use a different one."
+        }
+      }
+    },
+    "error": {
+      "invalid_url": "Enter a valid HTTP or HTTPS address with an optional port.",
+      "cannot_connect": "Could not connect to the Pi. Check its address, port, and network connection.",
+      "invalid_data": "The Pi returned invalid system stats. Confirm RTK-Base is installed and up to date."
+    },
+    "abort": {
+      "already_configured": "This RTK-Base device is already configured."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "temperature": {
+        "name": "Temperature"
+      },
+      "cpu_usage": {
+        "name": "CPU usage"
+      },
+      "memory_usage": {
+        "name": "Memory usage"
+      },
+      "memory_used": {
+        "name": "Memory used"
+      },
+      "disk_usage": {
+        "name": "Disk usage"
+      },
+      "uptime": {
+        "name": "Uptime"
+      },
+      "load_1m": {
+        "name": "Load average (1 min)"
+      },
+      "load_5m": {
+        "name": "Load average (5 min)"
+      },
+      "load_15m": {
+        "name": "Load average (15 min)"
+      }
+    }
+  }
+}

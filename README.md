@@ -6,7 +6,7 @@
 
 <p align="center">A Raspberry Pi RTK base station with an RTCM correction stream and a live GNSS diagnostics dashboard.</p>
 
-<p align="center"><strong>Dashboard version 0.11.4</strong></p>
+<p align="center"><strong>Dashboard version 0.11.5</strong></p>
 
 <p align="center">
   <img src="dashboard/static/icons/satellite-gps.svg" alt="GPS" width="28" height="28" title="GPS">
@@ -68,6 +68,193 @@ The dashboard runs on port **80**. The stream uses TCP port **2101** when it is
 available; if it is occupied, RTK-Base tries ports **2102–2120** and selects
 the first available one. The active port is shown in the dashboard's System
 panel and in setup's completion message.
+
+## Home Assistant
+
+The RTK-Base integration polls the existing read-only `/api/data` endpoint over
+your local network. Install and start RTK-Base on the Pi first; the dashboard
+and stats API are served by nginx on HTTP port **80**. The Flask application
+also listens on TCP port **8080**; use port 80 as the normal nginx entry point.
+
+### Install the integration
+
+With HACS:
+
+1. In Home Assistant, open **HACS → Integrations**, open the menu, and choose
+   **Custom repositories**.
+2. Add `https://github.com/DirectedHunt42/RTK-Base` as an **Integration**
+   repository, then find and download **RTK-Base**.
+3. Restart Home Assistant.
+
+Alternatively, copy this repository's
+[`custom_components/rtk_base/`](custom_components/rtk_base/) directory into
+`<Home Assistant configuration>/custom_components/rtk_base/` (create the
+`custom_components` directory if needed), then restart Home Assistant.
+
+### Add the Pi
+
+1. Make sure Home Assistant and the Pi can reach each other over the local
+   network. Check Wi-Fi/VLAN isolation and firewall rules if they cannot.
+2. In Home Assistant, open **Settings → Devices & services → Add integration**
+   and select **RTK-Base**.
+3. Enter the Pi's base address, for example `http://rtk-base.local`. Port 80 is
+   the default, so it can be omitted. If you configured nginx to use another
+   port, include it, for example `http://192.168.1.25:8081`. Do not use Flask's
+   port 8080 as an external address unless you have deliberately configured it
+   for that use. Use `https://` only if you configured HTTPS for the dashboard.
+4. If `rtk-base.local` does not resolve, find the Pi's IP in your router's
+   connected-device/DHCP lease list, or run `hostname -I` on the Pi. Enter
+   `http://` followed by that IP (for example `http://192.168.1.25`).
+
+Setup checks the address and validates the returned stats. The integration
+creates one RTK-Base device with temperature, CPU usage, memory usage and used
+memory, disk usage, uptime, and 1-, 5-, and 15-minute load-average sensors.
+It polls every 30 seconds. Missing measurements appear as unavailable.
+
+The API is unauthenticated and is intended for a trusted local network only.
+Do not forward it to or expose it directly on the public internet. The
+integration uses HTTP GET only and does not require MQTT, credentials, or
+changes to the dashboard's existing API behavior.
+
+`GET /api/data` keeps its existing fields and adds numeric `temp_c`,
+`memory_used_bytes`, `memory_total_bytes`, `uptime_seconds`, `load_1m`,
+`load_5m`, and `load_15m` fields. Existing `cpu`, `mem_pct`, and `disk_pct`
+fields are numeric percentages. Unavailable temperature or uptime values are
+JSON `null`. Memory values are bytes; uptime is seconds; load values are
+numeric Linux load averages.
+
+### Example dashboard card
+
+Install the `custom:button-card` Lovelace card separately. This example uses
+the default entity IDs; if Home Assistant assigned different IDs, replace
+`sensor.rtk_base_temperature` and the related IDs below with those shown in
+the integration's sensor list. The default related IDs are
+`sensor.rtk_base_cpu_usage`, `sensor.rtk_base_memory_usage`,
+`sensor.rtk_base_memory_used`, `sensor.rtk_base_disk_usage`,
+`sensor.rtk_base_uptime`, `sensor.rtk_base_load_1m`,
+`sensor.rtk_base_load_5m`, and `sensor.rtk_base_load_15m`.
+
+```yaml
+type: custom:button-card
+entity: sensor.rtk_base_temperature
+name: SKYCHOPPER
+icon: mdi:server-network
+show_state: true
+show_label: true
+state_display: |
+  [[[
+    const raw = entity?.state;
+    const value = raw && !['unknown', 'unavailable'].includes(raw.toLowerCase())
+      ? Number(raw) : NaN;
+    return Number.isFinite(value) ? `${value.toFixed(1)} °C` : '—';
+  ]]]
+label: |
+  [[[
+    const read = id => {
+      const raw = states[id]?.state;
+      if (!raw || ['unknown', 'unavailable'].includes(raw.toLowerCase())) return null;
+      const value = Number(raw);
+      return Number.isFinite(value) ? value : null;
+    };
+    const format = id => {
+      const value = read(id);
+      return value === null ? '—' : `${value.toFixed(1)}%`;
+    };
+    return `CPU ${format('sensor.rtk_base_cpu_usage')} · Memory ${format('sensor.rtk_base_memory_usage')}`;
+  ]]]
+custom_fields:
+  cpu_bar: |
+    [[[
+      const raw = states['sensor.rtk_base_cpu_usage']?.state;
+      const value = raw && !['unknown', 'unavailable'].includes(raw.toLowerCase())
+        ? Number(raw) : NaN;
+      if (!Number.isFinite(value)) return '<div>CPU usage unavailable</div>';
+      const percent = Math.max(0, Math.min(100, value));
+      const esc = text => String(text).replace(/[&<>"']/g, char =>
+        ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[char]));
+      return `<div style="background:#263548;border-radius:6px;height:8px;overflow:hidden">
+        <div style="background:#2196F3;height:100%;width:${esc(percent)}%"></div></div>`;
+    ]]]
+  details: |
+    [[[
+      const esc = text => String(text).replace(/[&<>"']/g, char =>
+        ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[char]));
+      const read = id => {
+        const raw = states[id]?.state;
+        if (!raw || ['unknown', 'unavailable'].includes(raw.toLowerCase())) return null;
+        const value = Number(raw);
+        return Number.isFinite(value) ? value : null;
+      };
+      const percent = id => {
+        const value = read(id);
+        return value === null ? '—' : `${value.toFixed(1)}%`;
+      };
+      const bytes = value => {
+        if (value === null || value < 0) return '—';
+        const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
+        let amount = value, index = 0;
+        while (amount >= 1024 && index < units.length - 1) {
+          amount /= 1024;
+          index++;
+        }
+        return `${amount.toFixed(index === 0 ? 0 : 1)} ${units[index]}`;
+      };
+      const duration = value => {
+        if (value === null || value < 0) return '—';
+        let seconds = Math.floor(value);
+        const days = Math.floor(seconds / 86400); seconds %= 86400;
+        const hours = Math.floor(seconds / 3600); seconds %= 3600;
+        const minutes = Math.floor(seconds / 60);
+        return [days && `${days}d`, hours && `${hours}h`, minutes && `${minutes}m`]
+          .filter(Boolean).join(' ') || '< 1m';
+      };
+      const load = id => {
+        const value = read(id);
+        return value === null ? '—' : value.toFixed(2);
+      };
+      const rows = [
+        ['Memory usage', percent('sensor.rtk_base_memory_usage')],
+        ['Memory used', bytes(read('sensor.rtk_base_memory_used'))],
+        ['Disk usage', percent('sensor.rtk_base_disk_usage')],
+        ['Uptime', duration(read('sensor.rtk_base_uptime'))],
+        ['Load (1 / 5 / 15 min)', [
+          load('sensor.rtk_base_load_1m'),
+          load('sensor.rtk_base_load_5m'),
+          load('sensor.rtk_base_load_15m')
+        ].join(' / ')]
+      ];
+      return `<div>${rows.map(([name, value]) =>
+        `<div style="display:flex;justify-content:space-between;gap:12px">
+          <span>${esc(name)}</span><span>${esc(value)}</span></div>`
+      ).join('')}</div>`;
+    ]]]
+styles:
+  card:
+    - padding: 16px
+  grid:
+    - grid-template-areas: '"i n" "i s" "l l" "cpu_bar cpu_bar" "details details"'
+    - grid-template-columns: 52px 1fr
+    - grid-template-rows: min-content min-content min-content 10px auto
+    - row-gap: 8px
+  icon:
+    - color: "#2196F3"
+    - width: 36px
+  name:
+    - justify-self: start
+    - font-weight: bold
+  state:
+    - justify-self: start
+    - font-size: 1.4em
+  label:
+    - justify-self: start
+  custom_fields:
+    cpu_bar:
+      - width: 100%
+    details:
+      - width: 100%
+      - font-size: 0.9em
+      - line-height: 1.7
+```
 
 ## Connect an RTK client
 

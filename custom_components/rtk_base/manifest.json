@@ -1,0 +1,11 @@
+{
+  "domain": "rtk_base",
+  "name": "RTK-Base",
+  "codeowners": ["@DirectedHunt42"],
+  "config_flow": true,
+  "documentation": "https://github.com/DirectedHunt42/RTK-Base#home-assistant",
+  "integration_type": "device",
+  "iot_class": "local_polling",
+  "requirements": [],
+  "version": "0.11.5"
+}
