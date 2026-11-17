@@ -493,6 +493,16 @@
   .readme-center { text-align: center; }
   .readme-center img { object-fit: contain; }
   .readme-content img { max-width: 100%; height: auto; }
+  .settings-dialog { width: min(620px, 100%); }
+  .settings-toggle { display: flex; align-items: center; gap: 10px; margin: 8px 0; color: var(--text); font-weight: 600; cursor: pointer; }
+  .settings-toggle input { accent-color: var(--green); width: 18px; height: 18px; }
+  .settings-description, .settings-status { color: var(--dim); font-size: 11px; margin: 10px 0; }
+  .settings-status { color: var(--amber); min-height: 1.5em; }
+  .settings-actions { display: flex; justify-content: flex-end; margin-top: 16px; }
+  .settings-actions button { border: 1px solid #28523f; border-radius: 5px; background: #111; color: var(--green); font: inherit; cursor: pointer; padding: 8px 12px; }
+  .settings-actions button:hover { background: #002211; border-color: var(--green); }
+  .settings-actions button:disabled { cursor: wait; opacity: 0.55; }
+  #settings-dialog-message { color: var(--amber); font-size: 11px; min-height: 1.5em; margin-top: 8px; }
   @media (max-width: 600px) {
     .file-dialog-backdrop { padding: 10px; }
     .file-dialog { max-height: 92vh; padding: 14px; }

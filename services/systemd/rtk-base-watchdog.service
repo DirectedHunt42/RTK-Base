@@ -1,0 +1,12 @@
+[Unit]
+Description=RTK-Base Dashboard Recovery Watchdog
+After=network.target rtk-dashboard.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/sbin/rtk-base-watchdog watch
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

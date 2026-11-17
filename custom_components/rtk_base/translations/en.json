@@ -49,6 +49,24 @@
       },
       "load_15m": {
         "name": "Load average (15 min)"
+      },
+      "gps_fix_mode": {
+        "name": "GNSS fix mode"
+      },
+      "gps_latitude": {
+        "name": "GPS latitude"
+      },
+      "gps_longitude": {
+        "name": "GPS longitude"
+      }
+    },
+    "select": {
+      "mode": {
+        "name": "Receiver mode",
+        "state": {
+          "corrections": "Corrections (pass to computer)",
+          "telemetry": "GPSD telemetry"
+        }
       }
     }
   }

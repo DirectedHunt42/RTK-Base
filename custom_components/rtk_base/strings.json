@@ -20,5 +20,16 @@
     "abort": {
       "already_configured": "This RTK-Base device is already configured."
     }
+  },
+  "entity": {
+    "select": {
+      "mode": {
+        "name": "Receiver mode",
+        "state": {
+          "corrections": "Corrections (pass to computer)",
+          "telemetry": "GPSD telemetry"
+        }
+      }
+    }
   }
 }

@@ -6,6 +6,7 @@ Terminal-style web interface
 
 from flask import Flask, render_template, jsonify, request, Response
 import json, subprocess, os, socket, psutil, time, math
+import html
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
@@ -206,6 +207,7 @@ def get_gps_data() -> dict:
     result = {
         "source": "GPSD telemetry mode",
         "fix": "No GPSD data",
+        "fix_mode": None,
         "position": "—",
         "latitude": None,
         "longitude": None,
@@ -263,11 +265,31 @@ def get_gps_data() -> dict:
                     break
             if tpv or sky_report_received:
                 mode = (tpv or {}).get("mode", 0)
+                if (
+                    isinstance(mode, (int, float))
+                    and not isinstance(mode, bool)
+                    and math.isfinite(mode)
+                    and float(mode).is_integer()
+                ):
+                    mode = int(mode)
                 result["fix"] = {0: "No fix", 1: "No fix", 2: "2D fix", 3: "3D fix"}.get(mode, f"Mode {mode}")
-                if tpv and "lat" in tpv and "lon" in tpv:
-                    result["latitude"] = tpv["lat"]
-                    result["longitude"] = tpv["lon"]
-                    result["position"] = f"{tpv['lat']:.6f}, {tpv['lon']:.6f}"
+                if tpv and isinstance(mode, int) and not isinstance(mode, bool) and mode >= 0:
+                    result["fix_mode"] = mode
+                latitude = (tpv or {}).get("lat")
+                longitude = (tpv or {}).get("lon")
+                if (
+                    isinstance(latitude, (int, float))
+                    and not isinstance(latitude, bool)
+                    and math.isfinite(latitude)
+                    and -90 <= latitude <= 90
+                    and isinstance(longitude, (int, float))
+                    and not isinstance(longitude, bool)
+                    and math.isfinite(longitude)
+                    and -180 <= longitude <= 180
+                ):
+                    result["latitude"] = latitude
+                    result["longitude"] = longitude
+                    result["position"] = f"{latitude:.6f}, {longitude:.6f}"
                 if tpv and "alt" in tpv:
                     result["altitude"] = f"{tpv['alt']:.1f} m"
                 if tpv and "speed" in tpv:
@@ -371,6 +393,7 @@ def update_runner_active() -> bool:
 DOWNLOAD_ITEMS = [
     {"id": "str2str-log", "name": "RTCM stream log", "category": "Logs", "description": "Recent str2str service output", "filename": "str2str.log"},
     {"id": "dashboard-log", "name": "Dashboard log", "category": "Logs", "description": "Recent Flask dashboard service output", "filename": "rtk-dashboard.log"},
+    {"id": "watchdog-log", "name": "Watchdog log", "category": "Logs", "description": "Dashboard recovery and reboot decisions", "filename": "rtk-base-watchdog.log"},
     {"id": "gpsd-log", "name": "GPSD log", "category": "Logs", "description": "Recent GPS telemetry service output", "filename": "rtk-gpsd.log"},
     {"id": "nginx-error-log", "name": "nginx error log", "category": "Logs", "description": "Last 1,000 nginx error log lines", "filename": "nginx-error.log"},
     {"id": "nginx-access-log", "name": "nginx access log", "category": "Logs", "description": "Last 1,000 nginx access log lines", "filename": "nginx-access.log"},
@@ -390,10 +413,13 @@ REPO_ASSOCIATIONS = [
     {"source": "scripts/receiver/start_str2str.py", "target": "/usr/local/sbin/rtk-base-start-str2str"},
     {"source": "scripts/maintenance/update.sh", "target": "/usr/local/sbin/rtk-base-update"},
     {"source": "scripts/maintenance/download_file.sh", "target": "/usr/local/sbin/rtk-base-download-file"},
+    {"source": "scripts/maintenance/watchdog.py", "target": "/usr/local/sbin/rtk-base-watchdog"},
     {"source": "services/systemd/str2str.service", "target": "/etc/systemd/system/str2str.service"},
     {"source": "services/systemd/rtk-dashboard.service", "target": "/etc/systemd/system/rtk-dashboard.service"},
     {"source": "services/systemd/rtk-gpsd.service", "target": "/etc/systemd/system/rtk-gpsd.service"},
+    {"source": "services/systemd/rtk-base-watchdog.service", "target": "/etc/systemd/system/rtk-base-watchdog.service"},
     {"source": "services/nginx/rtk-base.conf", "target": "/etc/nginx/sites-available/rtk-base"},
+    {"source": "dashboard/static/rtk-base-error.html", "target": "/var/www/rtk-base-error.html"},
     {"source": "setup.sh", "target": "/etc/default/rtk-base", "kind": "generated"},
     {"source": "setup.sh", "target": "/etc/sudoers.d/rtk-base-dashboard", "kind": "generated"},
 ]
@@ -429,6 +455,18 @@ def render_repo_tree(paths, associations) -> str:
 
 @app.route("/")
 def index():
+    error_flag = Path("/var/lib/rtk-base/watchdog/error-page")
+    try:
+        reason = error_flag.read_text(encoding="utf-8").strip()
+    except OSError:
+        reason = ""
+    if reason:
+        error_template = Path(__file__).resolve().parent / "static/rtk-base-error.html"
+        page = error_template.read_text(encoding="utf-8").replace(
+            "<p>The dashboard service is unavailable or is restarting.</p>",
+            f"<p>{html.escape(reason)}</p>",
+        )
+        return Response(page, mimetype="text/html")
     return render_template("index.html", version=APP_VERSION)
 
 @app.route("/api/data")
@@ -453,6 +491,7 @@ def api_data():
         local_hostname += ".local"
 
     rtcm_client_count = get_rtcm_client_count()
+    gps_data = get_gps_data()
 
     return jsonify({
         "version": APP_VERSION,
@@ -475,6 +514,9 @@ def api_data():
         "load_1m": load[0],
         "load_5m": load[1],
         "load_15m": load[2],
+        "gps_fix_mode": gps_data["fix_mode"],
+        "gps_latitude": gps_data["latitude"],
+        "gps_longitude": gps_data["longitude"],
         "rtcm_port": get_rtcm_port(),
         "rtcm_clients": rtcm_client_count,
         "str_restarts": get_service_restarts(),
@@ -488,10 +530,59 @@ def api_data():
         "ports": get_listening(),
         "usb": get_usb(),
         "serial": get_serial(),
-        "gps": get_gps_data(),
+        "gps": gps_data,
         "mode": get_mode(),
         "update_status": get_update_status(),
     })
+
+def get_watchdog_status() -> dict:
+    """Report whether the optional dashboard recovery watchdog is enabled."""
+    enabled = subprocess.run(
+        ["/usr/bin/systemctl", "is-enabled", "--quiet", "rtk-base-watchdog.service"],
+        check=False,
+    ).returncode == 0
+    active = subprocess.run(
+        ["/usr/bin/systemctl", "is-active", "--quiet", "rtk-base-watchdog.service"],
+        check=False,
+    ).returncode == 0
+    state = {}
+    try:
+        state = json.loads(Path("/var/lib/rtk-base/watchdog/state.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        pass
+    if not isinstance(state, dict):
+        state = {}
+    now = time.time()
+    recent_restarts = [
+        event for event in state.get("restart_events", [])
+        if isinstance(event, (int, float)) and 0 <= now - event <= 300
+    ]
+    return {
+        "enabled": enabled,
+        "active": active,
+        "recent_restarts": len(recent_restarts),
+        "error_page": Path("/var/lib/rtk-base/watchdog/error-page").exists(),
+    }
+
+@app.route("/api/settings/watchdog", methods=["GET", "POST"])
+def api_watchdog_settings():
+    if request.method == "GET":
+        return jsonify(get_watchdog_status())
+    payload = request.get_json(silent=True) or {}
+    enabled = payload.get("enabled")
+    if not isinstance(enabled, bool):
+        return jsonify({"error": "The enabled setting must be true or false"}), 400
+    action = "enable" if enabled else "disable"
+    try:
+        result = subprocess.run(
+            ["sudo", "-n", "/usr/local/sbin/rtk-base-watchdog", action],
+            capture_output=True, text=True, timeout=20, check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return jsonify({"error": "Could not update the watchdog setting"}), 500
+    if result.returncode != 0:
+        return jsonify({"error": result.stderr.strip() or "The watchdog setting could not be updated"}), 500
+    return jsonify(get_watchdog_status())
 
 @app.route("/api/mode", methods=["POST"])
 def api_mode():

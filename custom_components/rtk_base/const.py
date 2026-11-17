@@ -5,7 +5,7 @@ from homeassistant.const import Platform
 DOMAIN = "rtk_base"
 DEFAULT_HOST = "http://rtk-base.local"
 UPDATE_INTERVAL_SECONDS = 30
-PLATFORMS = [Platform.SENSOR]
+PLATFORMS = [Platform.SENSOR, Platform.SELECT]
 
 STAT_FIELDS = (
     "temp_c",
@@ -17,4 +17,7 @@ STAT_FIELDS = (
     "load_1m",
     "load_5m",
     "load_15m",
+    "gps_fix_mode",
+    "gps_latitude",
+    "gps_longitude",
 )

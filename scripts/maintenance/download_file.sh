@@ -17,6 +17,9 @@ case "$1" in
   dashboard-log)
     exec /usr/bin/journalctl -u rtk-dashboard.service -n 500 --no-pager -o short-iso
     ;;
+  watchdog-log)
+    exec /usr/bin/tail -n 1000 /var/lib/rtk-base/watchdog/watchdog.log
+    ;;
   gpsd-log)
     exec /usr/bin/journalctl -u rtk-gpsd.service -n 500 --no-pager -o short-iso
     ;;

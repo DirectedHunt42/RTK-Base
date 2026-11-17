@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>RTK-Base recovery required</title>
+  <style>
+    body { margin: 0; padding: 2rem; background: #0a0a0a; color: #d0d0d0; font: 16px/1.6 system-ui, sans-serif; }
+    main { max-width: 42rem; margin: 8vh auto; padding: 2rem; border: 1px solid #28523f; border-radius: 1rem; background: #111111; }
+    h1 { color: #00ff9f; }
+    code { overflow-wrap: anywhere; color: #ffb000; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>RTK-Base needs attention</h1>
+    <p>The watchdog detected repeated dashboard failures and could not restore normal service.</p>
+    <p>The dashboard service is unavailable or is restarting.</p>
+    <p>Check the service with <code>sudo systemctl status rtk-dashboard</code> and download the
+       <code>rtk-base-watchdog.log</code> file from
+       <code>http://&lt;pi-address&gt;/api/downloads/watchdog-log</code>.</p>
+    <p>After resolving the problem, clear this page and restart the service:</p>
+    <p><code>sudo /usr/local/sbin/rtk-base-watchdog disable</code><br>
+       <code>sudo systemctl restart rtk-dashboard</code></p>
+  </main>
+</body>
+</html>

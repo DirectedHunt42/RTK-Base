@@ -37,6 +37,9 @@ if [ ! -x /usr/bin/str2str ]; then
 fi
 
 echo "[2/7] Detecting receiver and creating directories..."
+mkdir -p /var/lib/rtk-base/watchdog
+touch /var/lib/rtk-base/watchdog/watchdog.log
+chmod 0644 /var/lib/rtk-base/watchdog/watchdog.log
 GNSS_DEVICE=""
 for candidate in /dev/serial/by-id/*u-blox*; do
   if [ -e "$candidate" ]; then
@@ -81,9 +84,12 @@ install -o root -g root -m 0755 scripts/receiver/set_mode.sh /usr/local/sbin/rtk
 install -o root -g root -m 0755 scripts/receiver/start_str2str.py /usr/local/sbin/rtk-base-start-str2str
 install -o root -g root -m 0755 scripts/maintenance/update.sh /usr/local/sbin/rtk-base-update
 install -o root -g root -m 0755 scripts/maintenance/download_file.sh /usr/local/sbin/rtk-base-download-file
+install -o root -g root -m 0755 scripts/maintenance/watchdog.py /usr/local/sbin/rtk-base-watchdog
+install -o root -g root -m 0644 services/systemd/rtk-base-watchdog.service /etc/systemd/system/rtk-base-watchdog.service
+install -o root -g root -m 0644 dashboard/static/rtk-base-error.html /var/www/rtk-base-error.html
 printf '%s\n' "$REPO_DIR" > /etc/rtk-base-update-repo
 chmod 0644 /etc/rtk-base-update-repo
-printf '%s\n' "$DASHBOARD_USER ALL=(root) NOPASSWD: /usr/local/sbin/rtk-base-set-mode corrections, /usr/local/sbin/rtk-base-set-mode telemetry, /usr/local/sbin/rtk-base-update, /usr/local/sbin/rtk-base-update --approve-apt-upgrade, /usr/local/sbin/rtk-base-update --decline-apt-upgrade, /usr/local/sbin/rtk-base-download-file, /usr/bin/systemctl reboot" > /etc/sudoers.d/rtk-base-dashboard
+printf '%s\n' "$DASHBOARD_USER ALL=(root) NOPASSWD: /usr/local/sbin/rtk-base-set-mode corrections, /usr/local/sbin/rtk-base-set-mode telemetry, /usr/local/sbin/rtk-base-update, /usr/local/sbin/rtk-base-update --approve-apt-upgrade, /usr/local/sbin/rtk-base-update --decline-apt-upgrade, /usr/local/sbin/rtk-base-download-file, /usr/local/sbin/rtk-base-watchdog enable, /usr/local/sbin/rtk-base-watchdog disable, /usr/bin/systemctl reboot" > /etc/sudoers.d/rtk-base-dashboard
 chmod 0440 /etc/sudoers.d/rtk-base-dashboard
 visudo -cf /etc/sudoers.d/rtk-base-dashboard
 ln -sf /etc/nginx/sites-available/rtk-base /etc/nginx/sites-enabled/rtk-base
@@ -95,6 +101,11 @@ systemctl disable --now gpsd.socket gpsd.service 2>/dev/null || true
 
 echo "[4/7] Reloading systemd..."
 systemctl daemon-reload
+
+# Preserve an already-enabled watchdog across setup and updates; leave new installs opt-in.
+if systemctl is-enabled --quiet rtk-base-watchdog.service; then
+  systemctl restart rtk-base-watchdog.service
+fi
 
 echo "[5/7] Enabling and starting services..."
 systemctl enable str2str

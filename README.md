@@ -6,7 +6,7 @@
 
 <p align="center">A Raspberry Pi RTK base station with an RTCM correction stream and a live GNSS diagnostics dashboard.</p>
 
-<p align="center"><strong>Dashboard version 0.11.6</strong></p>
+<p align="center"><strong>Dashboard version 0.12.2</strong></p>
 
 <p align="center">
   <img src="dashboard/static/icons/satellite-gps.svg" alt="GPS" width="28" height="28" title="GPS">
@@ -108,20 +108,37 @@ Alternatively, copy this repository's
 
 Setup checks the address and validates the returned stats. The integration
 creates one RTK-Base device with temperature, CPU usage, memory usage and used
-memory, disk usage, uptime, and 1-, 5-, and 15-minute load-average sensors.
-It polls every 30 seconds. Missing measurements appear as unavailable.
+memory, disk usage, uptime, 1-, 5-, and 15-minute load-average sensors, a
+numeric GNSS fix-mode sensor, and GPS latitude and longitude sensors. It polls
+every 30 seconds. Missing measurements appear as unavailable. GNSS fix mode
+uses GPSD's numeric values: 0 means unknown, 1 means no fix, 2 means 2D fix,
+and 3 means 3D fix. Coordinates are decimal degrees and are unavailable until
+GPSD reports a valid position. The new sensors have their own unique IDs;
+existing sensor IDs stay unchanged and the new API fields are additive, so
+existing Home Assistant dashboards keep their references.
+
+The integration also adds a **Receiver mode** selector. Choose **Corrections
+(pass to computer)** to stream RTCM corrections, or **GPSD telemetry** to read
+position and satellite data. Selecting a mode uses the existing `/api/mode`
+endpoint and refreshes the integration immediately. Its default entity ID is
+`select.rtk_base_receiver_mode`.
 
 The API is unauthenticated and is intended for a trusted local network only.
 Do not forward it to or expose it directly on the public internet. The
-integration uses HTTP GET only and does not require MQTT, credentials, or
-changes to the dashboard's existing API behavior.
+integration polls with HTTP GET and sends HTTP POST to `/api/mode` only when
+the receiver mode selector is changed. It does not require MQTT or credentials
+and uses the dashboard's existing mode-switch API.
 
 `GET /api/data` keeps its existing fields and adds numeric `temp_c`,
 `memory_used_bytes`, `memory_total_bytes`, `uptime_seconds`, `load_1m`,
-`load_5m`, and `load_15m` fields. Existing `cpu`, `mem_pct`, and `disk_pct`
+`load_5m`, `load_15m`, `gps_fix_mode`, `gps_latitude`, and `gps_longitude`
+fields. Existing `cpu`, `mem_pct`, and `disk_pct`
 fields are numeric percentages. Unavailable temperature or uptime values are
 JSON `null`. Memory values are bytes; uptime is seconds; load values are
-numeric Linux load averages.
+numeric Linux load averages. The GNSS fix mode is a number from GPSD: 0 means
+unknown, 1 means no fix, 2 means 2D, and 3 means 3D; it is `null` when GPSD
+has not reported a TPV fix mode. Latitude and longitude are decimal degrees
+and are `null` when GPSD has not reported a valid position.
 
 ### Example dashboard card
 
@@ -132,7 +149,9 @@ the integration's sensor list. The default related IDs are
 `sensor.rtk_base_cpu_usage`, `sensor.rtk_base_memory_usage`,
 `sensor.rtk_base_memory_used`, `sensor.rtk_base_disk_usage`,
 `sensor.rtk_base_uptime`, `sensor.rtk_base_load_1m`,
-`sensor.rtk_base_load_5m`, and `sensor.rtk_base_load_15m`.
+`sensor.rtk_base_load_5m`, `sensor.rtk_base_load_15m`,
+`sensor.rtk_base_gnss_fix_mode`, `sensor.rtk_base_gps_latitude`, and
+`sensor.rtk_base_gps_longitude`.
 
 ```yaml
 type: custom:button-card
@@ -286,6 +305,24 @@ or is sending usable RTCM messages.
 The dashboard refreshes its diagnostics automatically. Click a panel heading
 to collapse or expand it; the browser remembers your panel layout.
 
+Open **Settings** to enable the optional dashboard watchdog. Systemd already
+restarts the dashboard after a crash; when enabled, the watchdog counts three
+automatic dashboard restarts within five minutes and requests a Pi reboot. If
+the dashboard enters another three-restart loop within five minutes after that
+reboot, RTK-Base serves a recovery page instead of the dashboard. If the reboot
+command cannot complete, it serves the recovery page after two minutes. If the
+dashboard stays healthy for five minutes after reboot, the watchdog clears its
+escalation counter. Once shown, the recovery page remains until cleared over
+SSH. The watchdog log is available from the recovery page and the dashboard's
+Files dialog. To clear a recovery page over SSH, run:
+
+```bash
+sudo /usr/local/sbin/rtk-base-watchdog disable
+sudo systemctl restart rtk-dashboard
+```
+
+After the dashboard returns, you can enable the watchdog again in Settings.
+
 - **System and Resources** show host details and Raspberry Pi resource usage.
 - **RTK Stream Health** and **RX / TX Data Flow** show stream and network
   activity.
@@ -307,6 +344,7 @@ The orbital view's continent outlines use
 [ESA Gaia Data Release 3](https://www.cosmos.esa.int/web/gaia/dr3) (ESA/Gaia/DPAC).
 
 - <img src="dashboard/static/icons/files-config.svg" alt="Files and configuration" width="24" height="24"> **Files** opens selected logs and installed configuration downloads.
+- <img src="dashboard/static/icons/settings.svg" alt="Settings" width="24" height="24"> **Settings** controls the optional dashboard watchdog.
 - <img src="dashboard/static/icons/readme.svg" alt="README" width="24" height="24"> **README** opens this guide.
 - <img src="dashboard/static/icons/license.svg" alt="Licence" width="24" height="24"> **Licence** displays the project licence.
 - <img src="dashboard/static/icons/update.svg" alt="Update" width="24" height="24"> **Update** pulls the latest repository version, reruns setup, and checks for Raspberry Pi OS package upgrades. If upgrades are available, the dashboard asks whether to install them.
@@ -327,7 +365,8 @@ any changes you need before using the dashboard updater.
 
 Systemd services are `str2str`, `rtk-dashboard`, and `rtk-gpsd`. The GPSD unit
 starts when telemetry mode is selected; it conflicts with the `str2str`
-service.
+service. The optional `rtk-base-watchdog` service is installed but disabled
+until enabled in dashboard Settings.
 
 ## Check status and logs
 

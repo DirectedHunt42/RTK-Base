@@ -792,6 +792,66 @@ async function openFileDialog() {
     list.textContent = error.message;
   }
 }
+async function openSettingsDialog() {
+  const backdrop = document.getElementById('settings-dialog-backdrop');
+  const scrollbarWidth = window.innerWidth - document.documentElement.clientWidth;
+  const bodyPaddingRight = parseFloat(getComputedStyle(document.body).paddingRight) || 0;
+  document.body.style.paddingRight = `${bodyPaddingRight + scrollbarWidth}px`;
+  backdrop.hidden = false;
+  document.body.style.overflow = 'hidden';
+  document.getElementById('settings-dialog-message').textContent = '';
+  document.getElementById('watchdog-status').textContent = 'Loading watchdog status...';
+  document.querySelector('#settings-dialog-backdrop .file-dialog-close')?.focus();
+  try {
+    const response = await fetch('/api/settings/watchdog', { cache: 'no-store' });
+    const status = await response.json();
+    if (!response.ok) throw new Error(status.error || 'Could not read watchdog status');
+    renderWatchdogStatus(status);
+  } catch (error) {
+    document.getElementById('watchdog-status').textContent = error.message;
+  }
+}
+function renderWatchdogStatus(status) {
+  document.getElementById('watchdog-enabled').checked = status.enabled;
+  const statusText = status.error_page
+    ? 'The watchdog error page is active. Use SSH recovery instructions on that page to clear it.'
+    : status.enabled && status.active
+      ? `Enabled and monitoring · ${status.recent_restarts} automatic restart(s) in the last five minutes.`
+      : status.enabled
+        ? 'Enabled, but the watchdog service is not running.'
+        : 'Disabled. The dashboard still uses systemd automatic restarts.';
+  document.getElementById('watchdog-status').textContent = statusText;
+}
+async function saveWatchdogSetting() {
+  const button = document.getElementById('watchdog-save-button');
+  const message = document.getElementById('settings-dialog-message');
+  button.disabled = true;
+  message.textContent = 'Saving watchdog setting...';
+  try {
+    const response = await fetch('/api/settings/watchdog', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled: document.getElementById('watchdog-enabled').checked })
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || 'Could not save watchdog setting');
+    renderWatchdogStatus(result);
+    message.textContent = result.enabled ? 'Watchdog enabled.' : 'Watchdog disabled and recovery state cleared.';
+  } catch (error) {
+    message.textContent = error.message;
+  } finally {
+    button.disabled = false;
+  }
+}
+function closeSettingsDialog() {
+  document.getElementById('settings-dialog-backdrop').hidden = true;
+  document.body.style.overflow = '';
+  document.body.style.paddingRight = '';
+  document.getElementById('settings-button').focus();
+}
+function handleSettingsDialogBackdrop(event) {
+  if (event.target.id === 'settings-dialog-backdrop') closeSettingsDialog();
+}
 async function loadRepoFiles() {
   const button = document.getElementById('repo-refresh-button');
   const status = document.getElementById('repo-file-status');
@@ -1040,6 +1100,7 @@ document.addEventListener('keydown', event => {
   if (event.key === 'Escape' && !document.getElementById('file-dialog-backdrop').hidden) closeFileDialog();
   if (event.key === 'Escape' && !document.getElementById('readme-dialog-backdrop').hidden) closeReadmeDialog();
   if (event.key === 'Escape' && !document.getElementById('license-dialog-backdrop').hidden) closeLicenseDialog();
+  if (event.key === 'Escape' && !document.getElementById('settings-dialog-backdrop').hidden) closeSettingsDialog();
 });
 function closeUpdateTerminal() {
   document.getElementById('update-terminal-screen').classList.remove('active');

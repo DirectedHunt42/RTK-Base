@@ -97,6 +97,26 @@ SENSORS: tuple[RTKBaseSensorDescription, ...] = (
         native_unit_of_measurement="load",
         state_class=SensorStateClass.MEASUREMENT,
     ),
+    RTKBaseSensorDescription(
+        key="gps_fix_mode",
+        name="GNSS fix mode",
+        value_key="gps_fix_mode",
+        icon="mdi:crosshairs-gps",
+    ),
+    RTKBaseSensorDescription(
+        key="gps_latitude",
+        name="GPS latitude",
+        value_key="gps_latitude",
+        native_unit_of_measurement="°",
+        icon="mdi:latitude",
+    ),
+    RTKBaseSensorDescription(
+        key="gps_longitude",
+        name="GPS longitude",
+        value_key="gps_longitude",
+        native_unit_of_measurement="°",
+        icon="mdi:longitude",
+    ),
 )
 
 
